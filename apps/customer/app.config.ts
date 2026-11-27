@@ -107,6 +107,22 @@ const config: ExpoConfig = {
     ],
     ['react-native-maps', { androidGoogleMapsApiKey: tenant.googleMapsKey }],
     [
+      'expo-build-properties',
+      {
+        android: {
+          // Release builds shrink code with R8. WorkManager (pulled in by
+          // Google Play services) opens its Room database by reflection, so
+          // the generated *_Impl classes must survive shrinking or the app
+          // crashes on start ("Failed to create an instance of WorkDatabase").
+          extraProguardRules: [
+            '-keep class * extends androidx.room.RoomDatabase { <init>(); }',
+            '-keep class androidx.work.impl.WorkDatabase_Impl { *; }',
+            '-keep class androidx.work.** { *; }',
+          ].join('\n'),
+        },
+      },
+    ],
+    [
       'expo-splash-screen',
       {
         backgroundColor: tenant.primaryColor,

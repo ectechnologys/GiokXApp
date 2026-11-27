@@ -38,6 +38,9 @@ export function MapPinPicker({ coords, onCoordsChange, height = 200, locked = fa
   const map = useRef<MapView>(null);
   const region = useRef<Region | null>(null);
   const fromDrag = useRef<Coords | null>(null);
+  // Android can flag the map's own first positioning as a gesture, so only a
+  // real finger drag on the map may move the pin.
+  const touched = useRef(false);
 
   // A pin set from outside (address search, geocode) recentres the map.
   useEffect(() => {
@@ -69,9 +72,11 @@ export function MapPinPicker({ coords, onCoordsChange, height = 200, locked = fa
           pitchEnabled={false}
           toolbarEnabled={false}
           moveOnMarkerPress={false}
+          onPanDrag={() => { touched.current = true; }}
           onRegionChangeComplete={(r, details) => {
             region.current = r;
-            if (locked || !details?.isGesture) return;
+            if (locked || !details?.isGesture || !touched.current) return;
+            touched.current = false;
             const c = { lat: Math.round(r.latitude * 1e6) / 1e6, lng: Math.round(r.longitude * 1e6) / 1e6 };
             fromDrag.current = c;
             onCoordsChange(c);
