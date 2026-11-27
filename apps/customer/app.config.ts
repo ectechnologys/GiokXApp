@@ -6,8 +6,9 @@ import type { ExpoConfig } from 'expo/config';
 /**
  * One codebase, one branded app per cleaning company.
  *
- * Pick the company with the TENANT environment variable (default: chiams):
- *   TENANT=chiams npx expo start
+ * Pick the company with the TENANT environment variable (default: chiamstest,
+ * the test company):
+ *   TENANT=chiams npx expo start   # live Chiam's Cleaning
  * Each company lives in tenants/<slug>/: tenant.json plus, optionally, its own
  * icon.png / adaptive-icon.png / splash.png. Missing images fall back to the
  * shared ones in assets/images.
@@ -35,7 +36,9 @@ export interface TenantConfig {
   version: string;
 }
 
-const slug = process.env.TENANT ?? 'chiams';
+// Default is the TEST company, so development never touches live customers.
+// Build the live app with TENANT=chiams.
+const slug = process.env.TENANT ?? 'chiamstest';
 const dir = path.join(__dirname, 'tenants', slug);
 const file = path.join(dir, 'tenant.json');
 if (!fs.existsSync(file)) {

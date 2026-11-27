@@ -1,7 +1,7 @@
 {
   "slug": "chiams",
   "name": "Chiam's Cleaning",
-  "tenantId": "3f81cd61-a4a7-4a3f-9f3e-4f6c3b310e6d",
+  "tenantId": "0874e663-4f7b-4740-a231-af659bbb8232",
   "host": "chiams.giokx.com",
   "androidPackage": "com.giokx.chiams",
   "iosBundleId": "com.giokx.chiams",
@@ -9,5 +9,5 @@
   "primaryColor": "#1f80ff",
   "version": "1.0.0",
   "iconBackground": "#29292f",
-  "accent": "#c3a46f"
+  "accent": "#a98545"
 }

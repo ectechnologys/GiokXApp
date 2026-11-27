@@ -1,0 +1,13 @@
+{
+  "slug": "chiamstest",
+  "name": "Chiam's Testing",
+  "tenantId": "3f81cd61-a4a7-4a3f-9f3e-4f6c3b310e6d",
+  "host": "chiamstest.giokx.com",
+  "androidPackage": "com.giokx.chiamstest",
+  "iosBundleId": "com.giokx.chiamstest",
+  "scheme": "chiamstest",
+  "primaryColor": "#1f80ff",
+  "version": "1.0.0",
+  "iconBackground": "#29292f",
+  "accent": "#c3a46f"
+}

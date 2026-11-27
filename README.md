@@ -13,8 +13,13 @@ from the web repo `GiokX-SaaS-Project`.
 ```bash
 npm install
 cd apps/customer
-TENANT=chiams npx expo start
+npx expo start                 # Chiam's Testing (chiamstest.giokx.com) — the default
+TENANT=chiams npx expo start   # live Chiam's Cleaning (chiams.giokx.com) — real customers
 ```
+
+**Test on `chiamstest` first.** It is a separate company with its own app id
+(`com.giokx.chiamstest`), so the test app installs next to the live one and
+nothing done in it reaches real customers.
 
 Press `a` to open it in the Android emulator, or scan the QR code with Expo Go on
 an Android phone.
@@ -22,7 +27,9 @@ an Android phone.
 ## Add a company
 
 1. Create `apps/customer/tenants/<slug>/tenant.json` (copy `chiams`, change name,
-   host, package id, colour).
+   host, package id, colour). `tenantId` must be that company's own id (the
+   `tenants` row for its subdomain): services, holidays and public settings are
+   read with it.
 2. Optionally add `icon.png` (1024×1024), `adaptive-icon.png` and `splash.png`
    in the same folder. Missing ones fall back to `assets/images`.
 3. Build with `TENANT=<slug>`.
@@ -36,8 +43,8 @@ Needs Android Studio installed (it brings Java and the Android SDK).
 
 ```bash
 cd apps/customer
-export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ANDROID_HOME=~/Library/Android/sdk TENANT=chiams
-npx expo prebuild --platform android --no-install
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ANDROID_HOME=~/Library/Android/sdk TENANT=chiamstest   # or TENANT=chiams for live
+npx expo prebuild --platform android --clean --no-install
 cd android && NODE_ENV=production ./gradlew assembleRelease
 ```
 
