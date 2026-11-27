@@ -8,5 +8,6 @@
   "scheme": "chiams",
   "primaryColor": "#1f80ff",
   "version": "1.0.0",
-  "iconBackground": "#29292f"
+  "iconBackground": "#29292f",
+  "accent": "#c3a46f"
 }

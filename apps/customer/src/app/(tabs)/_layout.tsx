@@ -1,13 +1,11 @@
 import { NativeTabs } from 'expo-router/native-tabs';
 
-import { tenant } from '@/config/tenant';
-import { useColors } from '@/lib/theme';
+import { accent, gray } from '@/lib/theme';
 
 export default function TabsLayout() {
-  const c = useColors();
   return (
-    <NativeTabs backgroundColor={c.bg} iconColor={{ default: c.muted, selected: tenant.primaryColor }}
-      labelStyle={{ default: { color: c.muted }, selected: { color: tenant.primaryColor } }}>
+    <NativeTabs backgroundColor="#ffffff" indicatorColor="rgba(195,164,111,0.18)" iconColor={{ default: gray[400], selected: accent }}
+      labelStyle={{ default: { color: gray[500] }, selected: { color: accent } }}>
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Bookings</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon md="event_note" sf="calendar" />

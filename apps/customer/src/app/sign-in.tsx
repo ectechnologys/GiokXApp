@@ -3,6 +3,7 @@
 // form that creates one. Same customer-auth calls as the web /customer-login.
 import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,10 +11,14 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { BrandLogo } from '@/components/BrandLogo';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import { ArrowRight, ChevronDown, KeyRound } from 'lucide-react-native';
+
 import { ProfileForm } from '@/components/ProfileForm';
 import { PrimaryButton } from '@/components/ui';
 import { tenant } from '@/config/tenant';
@@ -111,45 +116,63 @@ export default function SignIn() {
   };
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: c.bg }]}>
+    <LinearGradient colors={['#eff6ff', '#ffffff', '#faf5ff']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.root}>
+    <SafeAreaView style={styles.root}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           {step !== 'profile' && (
             <>
-              <BrandLogo size={96} />
-              <Text style={[styles.brand, { color: c.text }]}>{tenant.name}</Text>
+              <Image source={require('@/assets/tenant/wordmark.png')} style={styles.wordmark} contentFit="contain" />
+              <Text style={styles.brand}>{tenant.name}</Text>
             </>
           )}
 
           {step === 'phone' && (
-            <>
-              <Text style={[styles.title, { color: c.text }]}>Sign in or sign up</Text>
-              <Text style={[styles.sub, { color: c.muted }]}>
-                Enter your phone number. We’ll send you a 6-digit code on WhatsApp. New here? We’ll set up your account
-                after the code.
-              </Text>
+            <View style={styles.card}>
+              <Text style={styles.title}>Sign in</Text>
+              <Text style={styles.sub}>We’ll send you a one-time code on WhatsApp.</Text>
+              <Text style={styles.label}>Phone number</Text>
+              <View style={styles.phoneRow}>
+                <View style={styles.cc}>
+                  <Text style={{ fontSize: 16 }}>🇲🇾</Text>
+                  <Text style={styles.ccText}>+60</Text>
+                  <ChevronDown size={14} color="#9ca3af" />
+                </View>
               <TextInput
                 value={phoneText}
                 onChangeText={setPhoneText}
-                placeholder="012-345 6789"
-                placeholderTextColor={c.muted}
+                placeholder="123456789"
+                placeholderTextColor="#9ca3af"
                 keyboardType="phone-pad"
                 autoComplete="tel"
                 textContentType="telephoneNumber"
                 returnKeyType="send"
                 onSubmitEditing={() => sendCode()}
                 editable={!busy}
-                style={[styles.input, { color: c.text, backgroundColor: c.field, borderColor: c.border }]}
+                style={styles.phoneInput}
               />
+              </View>
+              <Text style={styles.hint}>Paste any format — we’ll detect the country from your number.</Text>
               {err && <Text style={[styles.err, { color: c.danger }]}>{err}</Text>}
-              <PrimaryButton label="Send code" busy={busy} onPress={() => sendCode()} />
-            </>
+              <Pressable onPress={() => sendCode()} disabled={busy}
+                style={({ pressed }) => [styles.webBtn, { backgroundColor: tenant.primaryColor, opacity: busy ? 0.6 : pressed ? 0.85 : 1 }]}>
+                {busy ? <ActivityIndicator color="#fff" /> : (
+                  <>
+                    <KeyRound size={18} color="#fff" />
+                    <Text style={styles.webBtnText}>Send code</Text>
+                    <ArrowRight size={18} color="#fff" />
+                  </>
+                )}
+              </Pressable>
+              <Text style={styles.terms}>New here? We’ll set up your account after the code.</Text>
+            </View>
           )}
+          {step === 'phone' && <Text style={styles.footer}>By continuing you agree to {tenant.name}’s terms.</Text>}
 
           {step === 'code' && phone && (
-            <>
-              <Text style={[styles.title, { color: c.text }]}>Enter code</Text>
-              <Text style={[styles.sub, { color: c.muted }]}>
+            <View style={styles.card}>
+              <Text style={styles.title}>Verify your phone</Text>
+              <Text style={styles.sub}>
                 {channel === 'sms' ? 'We sent an SMS' : 'We sent a WhatsApp message'} to {formatPhone(phone)}.
               </Text>
               <TextInput
@@ -163,11 +186,11 @@ export default function SignIn() {
                 textContentType="oneTimeCode"
                 maxLength={CODE_LENGTH}
                 editable={!busy}
-                style={[styles.input, styles.code, { color: c.text, backgroundColor: c.field, borderColor: c.border }]}
+                style={[styles.input, styles.code]}
               />
               {devCode && <Text style={{ color: c.muted, textAlign: 'center' }}>Test code: {devCode}</Text>}
               {err && <Text style={[styles.err, { color: c.danger }]}>{err}</Text>}
-              <PrimaryButton label="Verify" busy={busy} disabled={code.length !== CODE_LENGTH} onPress={() => checkCode(code)} />
+              <PrimaryButton label="Verify & continue" color={tenant.primaryColor} busy={busy} disabled={code.length !== CODE_LENGTH} onPress={() => checkCode(code)} />
 
               {channel === 'whatsapp' && (
                 <Pressable disabled={wait > 0 || busy} onPress={() => sendCode(true)} style={styles.link}>
@@ -177,28 +200,42 @@ export default function SignIn() {
                 </Pressable>
               )}
               <Pressable onPress={back} style={styles.link}>
-                <Text style={{ color: c.muted }}>Use a different number</Text>
+                <Text style={{ color: c.muted }}>← Change phone</Text>
               </Pressable>
-            </>
+            </View>
           )}
 
           {step === 'profile' && phone && ticket && (
-            <ProfileForm ticket={ticket} phone={phone} onDone={(token, customer) => signIn(token, customer)} />
+            <View style={styles.card}><ProfileForm ticket={ticket} phone={phone} onDone={(token, customer) => signIn(token, customer)} /></View>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
   scroll: { flexGrow: 1, justifyContent: 'center', padding: 24, gap: 14 },
-  brand: { fontSize: 20, fontWeight: '700', textAlign: 'center', marginBottom: 12 },
-  title: { fontSize: 26, fontWeight: '700' },
-  sub: { fontSize: 15, lineHeight: 21 },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 18 },
-  code: { fontSize: 28, letterSpacing: 12, textAlign: 'center' },
+  wordmark: { width: 170, height: 52, alignSelf: 'center' },
+  card: { backgroundColor: '#fff', borderRadius: 24, padding: 26, gap: 6, borderWidth: 1, borderColor: '#f3f4f6',
+    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
+  label: { fontSize: 13, fontWeight: '600', color: '#4b5563', marginTop: 12 },
+  phoneRow: { flexDirection: 'row', borderWidth: 1.5, borderColor: '#3b82f6', borderRadius: 12, overflow: 'hidden', marginTop: 4 },
+  cc: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, backgroundColor: '#eff6ff', borderRightWidth: 1, borderRightColor: '#bfdbfe' },
+  ccText: { fontSize: 15, fontWeight: '600', color: '#1f2937' },
+  phoneInput: { flex: 1, fontSize: 17, paddingHorizontal: 12, paddingVertical: 13, color: '#111827' },
+  hint: { fontSize: 11, color: '#6b7280', marginTop: 4 },
+  webBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, paddingVertical: 14, marginTop: 14 },
+  webBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  terms: { fontSize: 12, color: '#6b7280', textAlign: 'center', marginTop: 10 },
+  footer: { fontSize: 12, color: '#6b7280', textAlign: 'center', marginTop: 12 },
+  brand: { fontSize: 17, fontWeight: '700', textAlign: 'center', marginBottom: 14, color: '#111827' },
+  title: { fontSize: 22, fontWeight: '700', color: '#111827' },
+  sub: { fontSize: 14, lineHeight: 20, color: '#6b7280' },
+  input: { borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#fff', color: '#111827', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 18, marginTop: 8 },
+  code: { fontSize: 24, letterSpacing: 10, textAlign: 'center', fontFamily: 'monospace' },
   err: { fontSize: 14 },
   link: { alignItems: 'center', paddingVertical: 8 },
 });

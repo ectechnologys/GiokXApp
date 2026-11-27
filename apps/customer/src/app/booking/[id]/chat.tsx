@@ -8,12 +8,11 @@ import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable,
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Notice } from '@/components/ui';
-import { tenant } from '@/config/tenant';
 import { chatList, chatSend, chatSendImage, pickPhoto, uuid, type ChatMessage } from '@/lib/extras';
 import { fmtTime } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import { useDisplaySettings } from '@/lib/settings';
-import { useColors } from '@/lib/theme';
+import { accent, useColors } from '@/lib/theme';
 
 export default function Chat() {
   const c = useColors();
@@ -78,7 +77,7 @@ export default function Chat() {
       <Stack.Screen options={{ title: 'Chat with the team' }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
         {who ? <Text style={[styles.who, { color: c.muted, borderBottomColor: c.border }]}>With {who}</Text> : null}
-        {q.isPending ? <ActivityIndicator style={{ marginTop: 40 }} color={tenant.primaryColor} /> : (
+        {q.isPending ? <ActivityIndicator style={{ marginTop: 40 }} color={accent} /> : (
           <FlatList
             ref={list}
             data={messages}
@@ -88,7 +87,7 @@ export default function Chat() {
             renderItem={({ item: m }) => {
               const mine = m.sender_type === 'customer';
               return (
-                <View style={[styles.bubble, mine ? styles.mine : styles.theirs, { backgroundColor: mine ? tenant.primaryColor : c.field }]}>
+                <View style={[styles.bubble, mine ? styles.mine : styles.theirs, { backgroundColor: mine ? accent : c.field }]}>
                   {!mine && <Text style={{ color: c.muted, fontSize: 12, fontWeight: '700' }}>{m.sender_name}{m.sender_role ? ` · ${m.sender_role}` : ''}</Text>}
                   {m.image_url ? <Image source={{ uri: m.image_url }} style={styles.img} contentFit="cover" /> : null}
                   {m.body ? <Text style={{ color: mine ? '#fff' : c.text, fontSize: 16 }}>{m.body}</Text> : null}
@@ -111,7 +110,7 @@ export default function Chat() {
             <Pressable onPress={sendPhoto} hitSlop={8} style={styles.icon}><Text style={{ fontSize: 22 }}>📷</Text></Pressable>
             <TextInput value={text} onChangeText={setText} placeholder="Message" placeholderTextColor={c.muted} multiline
               style={[styles.input, { color: c.text, backgroundColor: c.field }]} />
-            <Pressable onPress={sendText} disabled={!text.trim()} style={[styles.send, { backgroundColor: tenant.primaryColor, opacity: text.trim() ? 1 : 0.4 }]}>
+            <Pressable onPress={sendText} disabled={!text.trim()} style={[styles.send, { backgroundColor: accent, opacity: text.trim() ? 1 : 0.4 }]}>
               <Text style={{ color: '#fff', fontWeight: '700' }}>Send</Text>
             </Pressable>
           </View>

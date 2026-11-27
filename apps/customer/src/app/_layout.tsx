@@ -6,8 +6,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
 import { useColorScheme } from 'react-native';
 
-import { tenant } from '@/config/tenant';
 import { queryClient } from '@/lib/queries';
+import { accent } from '@/lib/theme';
 import { SessionProvider, useSession } from '@/lib/session';
 
 SplashScreen.preventAutoHideAsync();
@@ -44,7 +44,7 @@ function Routes() {
   if (loading) return null;
 
   return (
-    <Stack screenOptions={{ headerShown: false, headerTintColor: tenant.primaryColor }}>
+    <Stack screenOptions={{ headerShown: false, headerTintColor: accent, headerTitleStyle: { color: '#111827', fontWeight: '700' }, headerShadowVisible: false }}>
       <Stack.Protected guard={!!session}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="booking/[id]/index" options={{ headerShown: true, title: 'Booking' }} />
@@ -61,7 +61,7 @@ function Routes() {
 export default function RootLayout() {
   const scheme = useColorScheme();
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
-  const theme = { ...base, colors: { ...base.colors, primary: tenant.primaryColor } };
+  const theme = { ...base, colors: { ...base.colors, primary: accent } };
 
   return (
     <QueryClientProvider client={queryClient}>

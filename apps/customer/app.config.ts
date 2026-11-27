@@ -23,6 +23,8 @@ export interface TenantConfig {
   iosBundleId: string;
   scheme: string;
   primaryColor: string;
+  /** Website accent (tenant_site.theme.accent): account + booking pages. */
+  accent?: string;
   /** Adaptive-icon background behind the logo (default: primaryColor). */
   iconBackground?: string;
   version: string;
@@ -40,10 +42,14 @@ const tenant: TenantConfig = JSON.parse(fs.readFileSync(file, 'utf8'));
 // can see at a fixed path, so the tenant's icon is copied to assets/tenant/
 // (git-ignored, regenerated on every start / build).
 fs.mkdirSync(path.join(__dirname, 'assets', 'tenant'), { recursive: true });
-fs.copyFileSync(
-  fs.existsSync(path.join(dir, 'icon.png')) ? path.join(dir, 'icon.png') : path.join(__dirname, 'assets', 'images', 'icon.png'),
-  path.join(__dirname, 'assets', 'tenant', 'logo.png'),
-);
+const tenantImage = (name: string, fallback: string) =>
+  fs.copyFileSync(
+    fs.existsSync(path.join(dir, name)) ? path.join(dir, name) : path.join(__dirname, 'assets', 'images', fallback),
+    path.join(__dirname, 'assets', 'tenant', name === 'icon.png' ? 'logo.png' : name),
+  );
+tenantImage('icon.png', 'icon.png');
+// The company's wide logo (as on its website); falls back to the square icon.
+tenantImage('wordmark.png', 'icon.png');
 
 /** Tenant's own image if it has one, otherwise the shared default. */
 const asset = (name: string, fallback: string) =>
@@ -56,7 +62,8 @@ const config: ExpoConfig = {
   orientation: 'portrait',
   icon: asset('icon.png', 'icon.png'),
   scheme: tenant.scheme,
-  userInterfaceStyle: 'automatic',
+  // The website is light-only; the app matches it.
+  userInterfaceStyle: 'light',
   ios: {
     bundleIdentifier: tenant.iosBundleId,
   },

@@ -6,6 +6,7 @@ import { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Notice, PrimaryButton } from '@/components/ui';
+import { SectionLabel, WCard } from '@/components/web';
 import { tenant } from '@/config/tenant';
 import type { CustomerBooking } from '@/lib/api';
 import {
@@ -14,7 +15,7 @@ import {
 } from '@/lib/extras';
 import { money, todayIso } from '@/lib/format';
 import { queryClient } from '@/lib/queries';
-import { useColors } from '@/lib/theme';
+import { accent, useColors } from '@/lib/theme';
 
 const refreshBooking = () => Promise.all([
   queryClient.invalidateQueries({ queryKey: ['bookings'] }),
@@ -22,12 +23,11 @@ const refreshBooking = () => Promise.all([
 ]);
 
 export function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  const c = useColors();
   return (
-    <View style={[styles.card, { backgroundColor: c.field }]}>
-      <Text style={[styles.cardTitle, { color: c.muted }]}>{title.toUpperCase()}</Text>
+    <WCard>
+      <SectionLabel>{title}</SectionLabel>
       {children}
-    </View>
+    </WCard>
   );
 }
 
@@ -55,7 +55,7 @@ function Waiting({ onCancel }: { onCancel: () => void }) {
   const c = useColors();
   return (
     <View style={{ gap: 8, alignItems: 'center', paddingVertical: 6 }}>
-      <ActivityIndicator color={tenant.primaryColor} />
+      <ActivityIndicator color={accent} />
       <Text style={{ color: c.text, textAlign: 'center' }}>Waiting for your payment to go through…</Text>
       <Pressable onPress={onCancel} hitSlop={8}><Text style={{ color: '#c62828', fontWeight: '600' }}>I cancelled the payment</Text></Pressable>
     </View>
@@ -129,8 +129,8 @@ export function AddExtras({ b, token }: { b: CustomerBooking; token: string }) {
     return (
       <>
         {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
-        <Pressable onPress={() => setOpen(true)} style={[styles.outline, { borderColor: tenant.primaryColor }]}>
-          <Text style={{ color: tenant.primaryColor, fontWeight: '700', fontSize: 16 }}>+ Add extras</Text>
+        <Pressable onPress={() => setOpen(true)} style={[styles.outline, { borderColor: accent }]}>
+          <Text style={{ color: accent, fontWeight: '700', fontSize: 16 }}>+ Add extras</Text>
         </Pressable>
       </>
     );
@@ -138,7 +138,7 @@ export function AddExtras({ b, token }: { b: CustomerBooking; token: string }) {
 
   return (
     <Card title="Add extras">
-      {q.isPending && <ActivityIndicator color={tenant.primaryColor} />}
+      {q.isPending && <ActivityIndicator color={accent} />}
       {q.isError && <Notice tone="error">{(q.error as Error).message}</Notice>}
       {q.data && q.data.addons.length === 0 && <Text style={{ color: c.muted }}>No more extras can be added to this booking.</Text>}
       {q.data?.addons.map(a => {
@@ -146,7 +146,7 @@ export function AddExtras({ b, token }: { b: CustomerBooking; token: string }) {
         const shown = on ? prices.get(a.id) ?? a.price : a.is_member_special && q.data.is_member ? a.member_price : a.price;
         return (
           <Pressable key={a.id} onPress={() => setPicked(p => (on ? p.filter(x => x !== a.id) : [...p, a.id]))} style={styles.addonRow}>
-            <Text style={{ fontSize: 18, color: on ? tenant.primaryColor : c.muted }}>{on ? '☑' : '☐'}</Text>
+            <Text style={{ fontSize: 18, color: on ? accent : c.muted }}>{on ? '☑' : '☐'}</Text>
             <View style={{ flex: 1 }}>
               <Text style={{ color: c.text, fontWeight: '600' }}>{a.name}</Text>
               {a.description ? <Text style={{ color: c.muted, fontSize: 13 }} numberOfLines={2}>{a.description}</Text> : null}
@@ -220,16 +220,16 @@ export function Photos({ b, token }: { b: CustomerBooking; token: string }) {
             <Image source={{ uri: u }} style={styles.thumb} contentFit="cover" />
           </Pressable>
         ))}
-        {busy && <View style={[styles.thumb, styles.center]}><ActivityIndicator color={tenant.primaryColor} /></View>}
+        {busy && <View style={[styles.thumb, styles.center]}><ActivityIndicator color={accent} /></View>}
       </View>
       {err && <Notice tone="error">{err}</Notice>}
       {b.status !== 'cancelled' && (
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Pressable disabled={busy} onPress={add('camera')} style={[styles.outline, styles.flex1, { borderColor: tenant.primaryColor }]}>
-            <Text style={{ color: tenant.primaryColor, fontWeight: '700' }}>Take photo</Text>
+          <Pressable disabled={busy} onPress={add('camera')} style={[styles.outline, styles.flex1, { borderColor: accent }]}>
+            <Text style={{ color: accent, fontWeight: '700' }}>Take photo</Text>
           </Pressable>
-          <Pressable disabled={busy} onPress={add('library')} style={[styles.outline, styles.flex1, { borderColor: tenant.primaryColor }]}>
-            <Text style={{ color: tenant.primaryColor, fontWeight: '700' }}>From gallery</Text>
+          <Pressable disabled={busy} onPress={add('library')} style={[styles.outline, styles.flex1, { borderColor: accent }]}>
+            <Text style={{ color: accent, fontWeight: '700' }}>From gallery</Text>
           </Pressable>
         </View>
       )}
@@ -299,7 +299,7 @@ export function Review({ b, token, googleUrl, googleThreshold }: { b: CustomerBo
         {mine.reply_text ? <Text style={{ color: c.muted }}>{`Reply from ${tenant.name}: ${mine.reply_text}`}</Text> : null}
         {googleUrl && mine.rating >= googleThreshold ? (
           <Pressable onPress={() => WebBrowser.openBrowserAsync(googleUrl)}>
-            <Text style={{ color: tenant.primaryColor, fontWeight: '700' }}>Share it on Google too ›</Text>
+            <Text style={{ color: accent, fontWeight: '700' }}>Share it on Google too ›</Text>
           </Pressable>
         ) : null}
       </Card>
@@ -342,7 +342,7 @@ export function Review({ b, token, googleUrl, googleThreshold }: { b: CustomerBo
 const styles = StyleSheet.create({
   card: { borderRadius: 14, padding: 16, gap: 8 },
   cardTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 0.8 },
-  outline: { borderWidth: 1.5, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  outline: { borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center', backgroundColor: '#fff' },
   flex1: { flex: 1 },
   addonRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

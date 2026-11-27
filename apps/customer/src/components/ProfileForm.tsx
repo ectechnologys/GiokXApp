@@ -102,7 +102,7 @@ export function ProfileForm({ ticket, phone, onDone }: {
 
   return (
     <View style={{ gap: 16 }}>
-      <Text style={[styles.verified]}>✓ PHONE VERIFIED · {formatPhone(phone)}</Text>
+      <Text style={styles.verified}>✓ PHONE VERIFIED · {formatPhone(phone)}</Text>
       <View style={{ gap: 4 }}>
         <Text style={[styles.title, { color: c.text }]}>Complete your profile</Text>
         <Text style={{ color: c.muted, fontSize: 15 }}>A few details for your bookings with {tenant.name}.</Text>
@@ -161,14 +161,14 @@ export function ProfileForm({ ticket, phone, onDone }: {
         placeholder="e.g. Block B lobby, call on arrival" multiline />
 
       {err && <Notice tone="error">{err}</Notice>}
-      <PrimaryButton label={noEmailWarning ? 'Finish without email' : 'Finish'} busy={busy} onPress={save} />
+      <PrimaryButton label={noEmailWarning ? 'Finish without email' : 'Finish & go to booking'} color={tenant.primaryColor} busy={busy} onPress={save} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   verified: { color: '#1a7f37', fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
-  title: { fontSize: 26, fontWeight: '700' },
+  title: { fontSize: 22, fontWeight: '700' },
   label: { fontSize: 13, fontWeight: '600' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },

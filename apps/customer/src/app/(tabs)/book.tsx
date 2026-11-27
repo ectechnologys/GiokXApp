@@ -5,6 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useMemo, useState } from 'react';
+import { Image } from 'expo-image';
+import { ArrowLeft, ArrowRight, Check } from 'lucide-react-native';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -20,14 +22,21 @@ import { fmtDate, fmtTime, money, todayIso } from '@/lib/format';
 import { queryClient, useProfile } from '@/lib/queries';
 import { useSession } from '@/lib/session';
 import { useDisplaySettings } from '@/lib/settings';
-import { useColors } from '@/lib/theme';
+import { accent, bf } from '@/lib/theme';
 import { applyPeak, peakLabel, peakServiceMember, resolvePeak } from '@/shared/peakPricing';
 import { computeSpecialDiscount, specialDiscountFor } from '@/shared/specialDiscount';
 import { computeTax } from '@/shared/tax';
 
 type Step = 'service' | 'time' | 'address' | 'confirm' | 'paying' | 'done';
 const STEPS: Step[] = ['service', 'time', 'address', 'confirm'];
-const STEP_TITLE: Record<Step, string> = { service: 'Choose a service', time: 'Pick a date & time', address: 'Where', confirm: 'Confirm', paying: 'Payment', done: 'Booked' };
+const STEP_TITLE: Record<Step, [string, string]> = {
+  service: ['What do you need?', 'Pick a service, then any extras.'],
+  time: ['When would you like it?', 'Pick a date, then a time slot.'],
+  address: ['Where should we come?', 'Choose a saved address or add a new one.'],
+  confirm: ['Review & confirm', 'Check the details, then confirm.'],
+  paying: ['Payment', 'Finish paying in the browser.'],
+  done: ['You’re booked', 'We’ve sent the details to you.'],
+};
 
 const addDays = (iso: string, n: number) => {
   const d = new Date(`${iso}T00:00:00`);
@@ -37,7 +46,6 @@ const addDays = (iso: string, n: number) => {
 const hourOf = (t: string) => parseInt(t.slice(0, 2), 10);
 
 export default function Book() {
-  const c = useColors();
   const { session } = useSession();
   const token = session?.token;
   const profile = useProfile();
@@ -255,14 +263,14 @@ export default function Book() {
 
   // ── Render ───────────────────────────────────────────────────────────────
   if (cfgQ.isPending || svcQ.isPending) {
-    return <Center><ActivityIndicator color={tenant.primaryColor} /></Center>;
+    return <Center><ActivityIndicator color={accent} /></Center>;
   }
   if (cfgQ.isError || svcQ.isError) {
     const which = cfgQ.isError ? 'booking settings' : 'services';
     return (
       <Center>
         <Notice tone="error">{`Couldn’t load ${which}: ${((cfgQ.error ?? svcQ.error) as Error).message}`}</Notice>
-        <PrimaryButton label="Try again" onPress={() => { cfgQ.refetch(); svcQ.refetch(); }} />
+        <PrimaryButton label="Try again" color={bf.ink} onPress={() => { cfgQ.refetch(); svcQ.refetch(); }} />
       </Center>
     );
   }
@@ -278,254 +286,304 @@ export default function Book() {
     step === 'service' ? !!service :
     step === 'time' ? !!date && !!time :
     step === 'address' ? addressOk : false;
+  const ready = !!service && !!date && !!time && addressOk;
+  const payLabel = !cfg?.paymentEnabled || pointsCover ? 'Confirm booking' : `Pay ${money(Math.max(0, total - pointsApplied))}`;
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
-      <View style={styles.header}>
-        {stepIdx > 0 && step !== 'done' ? (
-          <Pressable onPress={back} hitSlop={12}><Text style={{ color: tenant.primaryColor, fontSize: 16, fontWeight: '600' }}>‹ Back</Text></Pressable>
-        ) : <View />}
-        {stepIdx >= 0 && <Text style={{ color: c.muted }}>Step {stepIdx + 1} of {STEPS.length}</Text>}
+    <SafeAreaView edges={['top']} style={styles.root}>
+      {/* Header: wordmark + BOOK ONLINE (web bf header) */}
+      <View style={styles.topbar}>
+        <Image source={require('@/assets/tenant/wordmark.png')} style={styles.wordmark} contentFit="contain" />
+        <Text style={styles.kicker}>BOOK ONLINE</Text>
       </View>
+      {/* Stepper: numbered dots, ink when done / current */}
+      {stepIdx >= 0 && (
+        <View style={styles.stepper}>
+          {STEPS.map((st, i) => {
+            const on = i <= stepIdx;
+            return (
+              <View key={st} style={styles.stepItem}>
+                <View style={[styles.dot, on ? styles.dotOn : null]}>
+                  {i < stepIdx ? <Check size={12} color="#fff" strokeWidth={3} /> : <Text style={[styles.dotText, on ? { color: '#fff' } : null]}>{i + 1}</Text>}
+                </View>
+                {i < STEPS.length - 1 && <View style={[styles.stepLine, i < stepIdx ? { backgroundColor: bf.ink } : null]} />}
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={[styles.h1, { color: c.text }]}>{STEP_TITLE[step]}</Text>
+        <View style={styles.panel}>
+          <Text style={styles.h1}>{STEP_TITLE[step][0]}</Text>
+          <Text style={styles.sub}>{STEP_TITLE[step][1]}</Text>
 
-        {step === 'service' && (
-          <>
-            {(svcQ.data ?? []).map(s => {
-              const on = service?.id === s.id;
-              const mem = memberOn(cust, today);
-              const from = (s.service_time_slots ?? [])
-                .map(x => Number(mem && Number(x.member_price) > 0 ? x.member_price : x.price ?? 0))
-                .filter(p => p > 0);
-              return (
-                <Pressable key={s.id} onPress={() => { if (!on) { setService(s); setAddonIds([]); setTime(null); setMaidId(null); } }}
-                  style={[styles.card, { backgroundColor: c.field, borderColor: on ? tenant.primaryColor : 'transparent' }]}>
-                  <Text style={[styles.cardTitle, { color: c.text }]}>{s.name}</Text>
-                  {s.description ? <Text style={{ color: c.muted }} numberOfLines={3}>{s.description}</Text> : null}
-                  <Text style={{ color: c.text, fontWeight: '600' }}>
-                    {from.length ? `From ${money(Math.min(...from))}` : ''}
-                    {'  ·  '}{durationLabel(s)}{s.pax === 2 ? '  ·  2 cleaners' : ''}
-                  </Text>
-                </Pressable>
-              );
-            })}
-            {service && addons.length > 0 && (
-              <>
-                <Text style={[styles.section, { color: c.muted }]}>EXTRAS</Text>
-                {addons.map(a => {
-                  const on = addonIds.includes(a.id);
-                  const memberPrice = a.is_member_special && price?.mem;
-                  return (
-                    <Pressable key={a.id} onPress={() => setAddonIds(ids => (on ? ids.filter(x => x !== a.id) : [...ids, a.id]))}
-                      style={[styles.addon, { backgroundColor: c.field, borderColor: on ? tenant.primaryColor : 'transparent' }]}>
-                      <Text style={{ fontSize: 18, color: on ? tenant.primaryColor : c.muted }}>{on ? '☑' : '☐'}</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: c.text, fontWeight: '600', fontSize: 16 }}>{a.name}</Text>
-                        {a.description ? <Text style={{ color: c.muted }} numberOfLines={2}>{a.description}</Text> : null}
-                      </View>
-                      <Text style={{ color: c.text, fontWeight: '600' }}>
-                        {on && price ? money(price.eff.get(a.id) ?? a.price) : memberPrice ? `${money(a.member_price ?? 0)} member` : money(a.price)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </>
-            )}
-          </>
-        )}
-
-        {step === 'time' && service && (
-          <>
-            {dates.length === 0 && (
-              <Notice tone="warn">{cfg?.bookingFrom ? `Bookings open from ${fmtDate(cfg.bookingFrom)}.` : 'No dates are open for booking right now.'}</Notice>
-            )}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {dates.map(d => {
-                const hol = holidays.get(d);
-                const on = d === date;
-                const dt = new Date(`${d}T00:00:00`);
+          {step === 'service' && (
+            <>
+              {(svcQ.data ?? []).map(s => {
+                const on = service?.id === s.id;
+                const mem = memberOn(cust, today);
+                const from = (s.service_time_slots ?? [])
+                  .map(x => Number(mem && Number(x.member_price) > 0 ? x.member_price : x.price ?? 0))
+                  .filter(p => p > 0);
                 return (
-                  <Pressable key={d} disabled={!!hol} onPress={() => { setDate(d); setTime(null); setMaidId(null); }}
-                    style={[styles.day, { backgroundColor: on ? tenant.primaryColor : c.field, opacity: hol ? 0.35 : 1 }]}>
-                    <Text style={{ color: on ? '#fff' : c.muted, fontSize: 12 }}>{dt.toLocaleDateString('en-GB', { weekday: 'short' })}</Text>
-                    <Text style={{ color: on ? '#fff' : c.text, fontSize: 20, fontWeight: '700' }}>{dt.getDate()}</Text>
-                    <Text style={{ color: on ? '#fff' : c.muted, fontSize: 12 }}>{dt.toLocaleDateString('en-GB', { month: 'short' })}</Text>
+                  <Pressable key={s.id} onPress={() => { if (!on) { setService(s); setAddonIds([]); setTime(null); setMaidId(null); } }}
+                    style={[styles.svc, on ? styles.svcOn : null]}>
+                    <View style={[styles.radio, on ? styles.radioOn : null]}>{on && <View style={styles.radioDot} />}</View>
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={styles.svcName}>{s.name}</Text>
+                      {s.description ? <Text style={styles.svcDesc} numberOfLines={3}>{s.description}</Text> : null}
+                      <Text style={styles.svcMeta}>{durationLabel(s)}{s.pax === 2 ? ' · 2 cleaners' : ''}</Text>
+                    </View>
+                    {from.length ? <Text style={styles.svcPrice}>{`From\n${money(Math.min(...from))}`}</Text> : null}
                   </Pressable>
                 );
               })}
-            </ScrollView>
+              {service && addons.length > 0 && (
+                <>
+                  <Text style={styles.section}>ADD EXTRAS</Text>
+                  {addons.map(a => {
+                    const on = addonIds.includes(a.id);
+                    const memberPrice = a.is_member_special && price?.mem;
+                    return (
+                      <Pressable key={a.id} onPress={() => setAddonIds(ids => (on ? ids.filter(x => x !== a.id) : [...ids, a.id]))}
+                        style={[styles.svc, on ? styles.svcOn : null]}>
+                        <View style={[styles.box, on ? styles.boxOn : null]}>{on && <Check size={12} color="#fff" strokeWidth={3} />}</View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.svcName}>{a.name}</Text>
+                          {a.description ? <Text style={styles.svcDesc} numberOfLines={2}>{a.description}</Text> : null}
+                        </View>
+                        <Text style={styles.addonPrice}>
+                          {on && price ? money(price.eff.get(a.id) ?? a.price) : memberPrice ? `${money(a.member_price ?? 0)}\nmember` : money(a.price)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </>
+              )}
+            </>
+          )}
 
-            {date && (
-              <>
-                <Text style={[styles.section, { color: c.muted }]}>{fmtDate(date).toUpperCase()}</Text>
-                {slotsQ.isPending ? <ActivityIndicator color={tenant.primaryColor} /> : (
-                  <View style={styles.chips}>
-                    {serviceTimes(service).map(t => {
-                      const h = hourOf(t);
-                      const st = byHour[h];
-                      if (st?.status === 'hidden' && (st.reason.startsWith('Outside working hours') || st.reason.startsWith('Closed on this day'))) return null;
-                      const now = new Date();
-                      const past = date === today && h <= now.getHours();
-                      const blocked = past || !st || st.status === 'full' || st.status === 'hidden';
-                      const on = time === t && !blocked;
-                      const p = price?.perHour[h];
+          {step === 'time' && service && (
+            <>
+              {dates.length === 0 && (
+                <Notice tone="warn">{cfg?.bookingFrom ? `Online booking opens for dates from ${fmtDate(cfg.bookingFrom)}.` : 'No dates are open for booking right now.'}</Notice>
+              )}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {dates.map(d => {
+                  const hol = holidays.get(d);
+                  const on = d === date;
+                  const dt = new Date(`${d}T00:00:00`);
+                  return (
+                    <Pressable key={d} disabled={!!hol} onPress={() => { setDate(d); setTime(null); setMaidId(null); }}
+                      style={[styles.day, on ? styles.dayOn : null, d === today && !on ? { borderColor: accent } : null, hol ? { opacity: 0.4 } : null]}>
+                      <Text style={[styles.dayWk, on ? { color: 'rgba(255,255,255,0.7)' } : null]}>{dt.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase()}</Text>
+                      <Text style={[styles.dayNum, on ? { color: '#fff' } : null]}>{dt.getDate()}</Text>
+                      <Text style={[styles.dayWk, on ? { color: 'rgba(255,255,255,0.7)' } : null]}>{dt.toLocaleDateString('en-GB', { month: 'short' })}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              {date && (
+                <>
+                  <Text style={styles.section}>{fmtDate(date).toUpperCase()}</Text>
+                  {slotsQ.isPending ? <ActivityIndicator color={bf.ink} /> : (
+                    <View style={styles.times}>
+                      {serviceTimes(service).map(t => {
+                        const h = hourOf(t);
+                        const st = byHour[h];
+                        if (st?.status === 'hidden' && (st.reason.startsWith('Outside working hours') || st.reason.startsWith('Closed on this day'))) return null;
+                        const now = new Date();
+                        const past = date === today && h <= now.getHours();
+                        const blocked = past || !st || st.status === 'full' || st.status === 'hidden';
+                        const on = time === t && !blocked;
+                        const p = price?.perHour[h];
+                        return (
+                          <Pressable key={t} disabled={blocked} onPress={() => setTime(t)}
+                            style={[styles.time, on ? styles.timeOn : null, blocked ? styles.timeOff : null]}>
+                            <Text style={[styles.timeText, on ? { color: '#fff' } : null, blocked ? styles.strike : null]}>{fmtTime(t, timeFormat)}</Text>
+                            {p ? <Text style={[styles.timePrice, on ? { color: 'rgba(255,255,255,0.72)' } : null, blocked ? styles.strike : null]}>RM {p}</Text> : null}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+                  {slotsQ.data && Object.values(byHour).every(s => s.status !== 'available') && (
+                    <Text style={styles.sub}>No free times on this day. Try another date.</Text>
+                  )}
+                </>
+              )}
+
+              {time && maids.length > 0 && (
+                <>
+                  <Text style={styles.section}>YOUR TEAM</Text>
+                  <View style={styles.pills}>
+                    {[{ id: null as string | null, label: 'Any available' }, ...maids].map(m => {
+                      const on = maidId === m.id;
                       return (
-                        <Pressable key={t} disabled={blocked} onPress={() => setTime(t)}
-                          style={[styles.chip, { backgroundColor: on ? tenant.primaryColor : c.field, opacity: blocked ? 0.35 : 1 }]}>
-                          <Text style={{ color: on ? '#fff' : c.text, fontWeight: '700' }}>{fmtTime(t, timeFormat)}</Text>
-                          {p ? <Text style={{ color: on ? '#fff' : c.muted, fontSize: 12 }}>{money(p)}</Text> : null}
+                        <Pressable key={m.id ?? 'any'} onPress={() => setMaidId(on && m.id ? null : m.id)} style={[styles.pill, on ? styles.pillOn : null]}>
+                          <Text style={[styles.pillText, on ? { color: '#fff' } : null]}>{m.label}</Text>
                         </Pressable>
                       );
                     })}
                   </View>
-                )}
-                {slotsQ.data && Object.values(byHour).every(s => s.status !== 'available') && (
-                  <Text style={{ color: c.muted }}>No free times on this day. Try another date.</Text>
-                )}
-              </>
-            )}
+                  <Text style={styles.note}>
+                    Free to choose — we’ll hold them for this visit. Where a job takes two people, the one you pick is the one we promise.
+                  </Text>
+                </>
+              )}
+            </>
+          )}
 
-            {time && maids.length > 0 && (
-              <>
-                <Text style={[styles.section, { color: c.muted }]}>YOUR TEAM</Text>
-                <View style={styles.chips}>
-                  {[{ id: null as string | null, label: 'Any available' }, ...maids].map(m => {
-                    const on = maidId === m.id;
-                    return (
-                      <Pressable key={m.id ?? 'any'} onPress={() => setMaidId(on && m.id ? null : m.id)}
-                        style={[styles.chip, { backgroundColor: on ? tenant.primaryColor : c.field }]}>
-                        <Text style={{ color: on ? '#fff' : c.text, fontWeight: '600' }}>{m.label}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                <Text style={{ color: c.muted, fontSize: 13 }}>
-                  Free to choose. We’ll hold them for this visit. If a job takes two people, the one you pick is the one we promise.
-                </Text>
-              </>
-            )}
-          </>
-        )}
-
-        {step === 'address' && (
-          <>
-            {saved.map((a, i) => {
-              const on = addrIdx === i;
-              return (
-                <Pressable key={a.id} onPress={() => setAddrIdx(i)}
-                  style={[styles.card, { backgroundColor: c.field, borderColor: on ? tenant.primaryColor : 'transparent' }]}>
-                  <Text style={{ color: c.text, fontSize: 16, fontWeight: '600' }}>{[a.unit_number, a.address].filter(Boolean).join(', ')}</Text>
-                  {(a.postcode || a.city) ? <Text style={{ color: c.muted }}>{[a.postcode, a.city].filter(Boolean).join(' ')}</Text> : null}
+          {step === 'address' && (
+            <>
+              {saved.map((a, i) => {
+                const on = addrIdx === i;
+                return (
+                  <Pressable key={a.id} onPress={() => setAddrIdx(i)} style={[styles.svc, on ? styles.svcOn : null]}>
+                    <View style={[styles.radio, on ? styles.radioOn : null]}>{on && <View style={styles.radioDot} />}</View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.svcName}>{[a.unit_number, a.address].filter(Boolean).join(', ')}</Text>
+                      {(a.postcode || a.city) ? <Text style={styles.svcDesc}>{[a.postcode, a.city].filter(Boolean).join(' ')}</Text> : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
+              {saved.length > 0 && (
+                <Pressable onPress={() => setAddrIdx('new')} style={[styles.svc, addrIdx === 'new' ? styles.svcOn : null]}>
+                  <View style={[styles.radio, addrIdx === 'new' ? styles.radioOn : null]}>{addrIdx === 'new' && <View style={styles.radioDot} />}</View>
+                  <Text style={styles.svcName}>Use a new address</Text>
                 </Pressable>
-              );
-            })}
-            {saved.length > 0 && (
-              <Pressable onPress={() => setAddrIdx('new')}
-                style={[styles.card, { backgroundColor: c.field, borderColor: addrIdx === 'new' ? tenant.primaryColor : 'transparent' }]}>
-                <Text style={{ color: tenant.primaryColor, fontSize: 16, fontWeight: '700' }}>+ Use a new address</Text>
-              </Pressable>
-            )}
-            {addrIdx === 'new' && (
-              <>
-                <Field label="Unit / House No." required value={addr.unit} onChangeText={v => setAddr(a => ({ ...a, unit: v }))} placeholder="A-12-34 or 56" />
-                <Field label="Address" required value={addr.address} onChangeText={v => setAddr(a => ({ ...a, address: v }))} placeholder="Street, area" multiline />
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <View style={{ flex: 1 }}><Field label="Postcode" value={addr.postcode} keyboardType="number-pad" maxLength={6} onChangeText={v => setAddr(a => ({ ...a, postcode: v.replace(/\D/g, '') }))} /></View>
-                  <View style={{ flex: 1.4 }}><Field label="City" value={addr.city} onChangeText={v => setAddr(a => ({ ...a, city: v }))} /></View>
-                </View>
-                <Field label="Directions for our team (optional)" value={addr.lobby} onChangeText={v => setAddr(a => ({ ...a, lobby: v }))} />
-              </>
-            )}
-            <Field label="Notes for this booking (optional)" value={notes} onChangeText={setNotes} multiline placeholder="Anything we should know?" />
-          </>
-        )}
+              )}
+              {addrIdx === 'new' && (
+                <>
+                  <Field label="Unit / House No." required value={addr.unit} onChangeText={v => setAddr(a => ({ ...a, unit: v }))} placeholder="A-12-34 or 56" />
+                  <Field label="Address" required value={addr.address} onChangeText={v => setAddr(a => ({ ...a, address: v }))} placeholder="Street, area" multiline />
+                  <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <View style={{ flex: 1 }}><Field label="Postcode" value={addr.postcode} keyboardType="number-pad" maxLength={6} onChangeText={v => setAddr(a => ({ ...a, postcode: v.replace(/\D/g, '') }))} /></View>
+                    <View style={{ flex: 1.4 }}><Field label="City" value={addr.city} onChangeText={v => setAddr(a => ({ ...a, city: v }))} /></View>
+                  </View>
+                  <Field label="Directions for our team (optional)" value={addr.lobby} onChangeText={v => setAddr(a => ({ ...a, lobby: v }))} />
+                </>
+              )}
+              <Field label="Notes for this booking (optional)" value={notes} onChangeText={setNotes} multiline placeholder="Anything we should know?" />
+            </>
+          )}
 
-        {step === 'confirm' && service && price && date && time && (
-          <>
-            <View style={[styles.card, { backgroundColor: c.field, borderColor: 'transparent' }]}>
-              <Text style={[styles.cardTitle, { color: c.text }]}>{service.name}</Text>
-              <Text style={{ color: c.text }}>{fmtDate(date)} · {fmtTime(time, timeFormat)} · {durationLabel(service, time)}</Text>
-              <Text style={{ color: c.muted }}>{chosen ? [chosen.unit_number, chosen.address].filter(Boolean).join(', ') : [addr.unit, addr.address].filter(Boolean).join(', ')}</Text>
-              {maidId && <Text style={{ color: c.muted }}>Cleaner: {maids.find(m => m.id === maidId)?.label}</Text>}
-            </View>
-            <View style={[styles.card, { backgroundColor: c.field, borderColor: 'transparent' }]}>
-              <Line label={service.name + (price.mem ? ' (member)' : '')} value={money(price.base)} />
-              {price.peak.add > 0 && <Line label={peakLabel(price.peak, 'RM', price.mem) || 'Peak surcharge'} value={`+ ${money(price.peak.add)}`} />}
-              {pickedAddons.map(a => <Line key={a.id} label={a.name} value={money(price.eff.get(a.id) ?? a.price)} />)}
-              {price.sd > 0 && <Line label="Special discount" value={`− ${money(price.sd)}`} />}
-              {price.tax.tax > 0 && <Line label={`${cfg?.taxName ?? 'Tax'} (${cfg?.taxRate}%${cfg?.taxMode === 'inclusive' ? ', included' : ''})`} value={money(price.tax.tax)} />}
-              {price.tax.rounding > 0 && <Line label="Rounding" value={money(price.tax.rounding)} />}
-              <Line label="Total" value={money(total)} bold />
-              {pointsApplied > 0 && <Line label={`Paid with ${pointsName}`} value={`− ${money(pointsApplied)}`} />}
-              {pointsApplied > 0 && <Line label="To pay" value={money(Math.max(0, Math.round((total - pointsApplied) * 100) / 100))} bold />}
-            </View>
-            {pointsOn && balance > 0 && (
-              <View style={[styles.addon, { backgroundColor: c.field, borderColor: 'transparent' }]}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: c.text, fontWeight: '600', fontSize: 16 }}>Use {pointsName}</Text>
-                  <Text style={{ color: c.muted }}>Balance {balance.toLocaleString()}</Text>
-                </View>
-                <Switch value={usePoints} onValueChange={setUsePoints} trackColor={{ true: tenant.primaryColor }} />
+          {step === 'confirm' && service && price && date && time && (
+            <>
+              <View style={styles.receipt}>
+                <Line label={service.name + (price.mem ? ' (member)' : '')} value={money(price.base)} />
+                {price.peak.add > 0 && <Line label={peakLabel(price.peak, 'RM', price.mem) || 'Peak surcharge'} value={`+ ${money(price.peak.add)}`} />}
+                {pickedAddons.map(a => <Line key={a.id} label={a.name} value={money(price.eff.get(a.id) ?? a.price)} />)}
+                {price.sd > 0 && <Line label="Special discount" value={`− ${money(price.sd)}`} />}
+                {price.tax.tax > 0 && <Line label={`${cfg?.taxName ?? 'Tax'} (${cfg?.taxRate}%${cfg?.taxMode === 'inclusive' ? ', included' : ''})`} value={money(price.tax.tax)} />}
+                {price.tax.rounding > 0 && <Line label="Rounding" value={money(price.tax.rounding)} />}
+                <View style={styles.rule} />
+                <Line label="Total" value={money(total)} bold />
+                {pointsApplied > 0 && <Line label={`Paid with ${pointsName}`} value={`− ${money(pointsApplied)}`} />}
+                {pointsApplied > 0 && <Line label="To pay" value={money(Math.max(0, Math.round((total - pointsApplied) * 100) / 100))} bold />}
               </View>
-            )}
-            {err && <Notice tone="error">{err}</Notice>}
-            <PrimaryButton busy={busy} onPress={submit}
-              label={!cfg?.paymentEnabled || pointsCover ? 'Confirm booking' : `Pay ${money(Math.max(0, total - pointsApplied))}`} />
-            {cfg?.paymentEnabled && !pointsCover && (
-              <Text style={{ color: c.muted, textAlign: 'center', fontSize: 13 }}>You’ll pay securely with HitPay. Your booking is confirmed once payment goes through.</Text>
-            )}
-          </>
-        )}
+              {pointsOn && balance > 0 && (
+                <View style={[styles.svc, { alignItems: 'center' }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.svcName}>Use {pointsName}</Text>
+                    <Text style={styles.svcDesc}>Balance {balance.toLocaleString()}</Text>
+                  </View>
+                  <Switch value={usePoints} onValueChange={setUsePoints} trackColor={{ true: accent }} />
+                </View>
+              )}
+              {err && <Notice tone="error">{err}</Notice>}
+              {cfg?.paymentEnabled && !pointsCover && (
+                <Text style={styles.note}>You’ll pay securely with HitPay. Your booking is confirmed once payment goes through.</Text>
+              )}
+            </>
+          )}
 
-        {step === 'paying' && (
-          <View style={{ gap: 14, alignItems: 'center', marginTop: 20 }}>
-            <ActivityIndicator size="large" color={tenant.primaryColor} />
-            <Text style={{ color: c.text, fontSize: 16, textAlign: 'center' }}>Waiting for your payment to go through…</Text>
-            <Text style={{ color: c.muted, textAlign: 'center' }}>Finish paying in the browser. This screen updates by itself.</Text>
-            {err && <Notice tone="error">{err}</Notice>}
-            <Pressable onPress={cancelPayment} disabled={busy} style={{ padding: 10 }}>
-              <Text style={{ color: '#c62828', fontWeight: '600' }}>{busy ? 'Checking…' : 'I cancelled the payment'}</Text>
-            </Pressable>
-          </View>
-        )}
-
-        {step === 'done' && done && (
-          <View style={{ gap: 12 }}>
-            <Notice tone="ok">Your booking is confirmed.</Notice>
-            <View style={[styles.card, { backgroundColor: c.field, borderColor: 'transparent' }]}>
-              <Text style={[styles.cardTitle, { color: c.text }]}>{done.service_name ?? service?.name}</Text>
-              <Text style={{ color: c.text }}>
-                {fmtDate(done.appointment_date ?? date ?? '')} · {fmtTime(done.appointment_time ?? time, timeFormat)}
-              </Text>
-              {(done.addons ?? []).map(a => <Text key={a.id} style={{ color: c.muted }}>+ {a.name}</Text>)}
+          {step === 'paying' && (
+            <View style={{ gap: 14, alignItems: 'center', marginTop: 10 }}>
+              <ActivityIndicator size="large" color={accent} />
+              <Text style={[styles.svcName, { textAlign: 'center' }]}>Waiting for your payment to go through…</Text>
+              <Text style={[styles.sub, { textAlign: 'center' }]}>This screen updates by itself.</Text>
+              {err && <Notice tone="error">{err}</Notice>}
+              <Pressable onPress={cancelPayment} disabled={busy} style={{ padding: 10 }}>
+                <Text style={{ color: bf.danger, fontWeight: '600' }}>{busy ? 'Checking…' : 'I cancelled the payment'}</Text>
+              </Pressable>
             </View>
-            <PrimaryButton label="See my bookings" onPress={() => { reset(); router.navigate('/'); }} />
-            <Pressable onPress={reset} style={{ alignItems: 'center', padding: 10 }}>
-              <Text style={{ color: tenant.primaryColor, fontWeight: '600' }}>Book another</Text>
-            </Pressable>
-          </View>
-        )}
+          )}
 
-        {(step === 'service' || step === 'time' || step === 'address') && (
-          <>
-            {err && <Notice tone="error">{err}</Notice>}
-            <PrimaryButton label="Continue" disabled={!canNext} onPress={next} />
-          </>
+          {step === 'done' && done && (
+            <View style={{ gap: 12 }}>
+              <View style={styles.doneBadge}><Check size={22} color={bf.good} strokeWidth={3} /></View>
+              <View style={styles.receipt}>
+                <Text style={styles.svcName}>{done.service_name ?? service?.name}</Text>
+                <Text style={styles.svcDesc}>{fmtDate(done.appointment_date ?? date ?? '')} · {fmtTime(done.appointment_time ?? time, timeFormat)}</Text>
+                {(done.addons ?? []).map(a => <Text key={a.id} style={styles.svcDesc}>+ {a.name}</Text>)}
+              </View>
+              <PrimaryButton label="See my bookings" color={accent} onPress={() => { reset(); router.navigate('/'); }} />
+              <Pressable onPress={reset} style={{ alignItems: 'center', padding: 10 }}>
+                <Text style={{ color: bf.ink, fontWeight: '600' }}>Book another</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+
+        {/* "Your booking" summary card (web bf-summary) */}
+        {stepIdx >= 0 && (
+          <View style={styles.summary}>
+            <View style={styles.sumHead}>
+              <Text style={styles.sumTitle}>Your booking</Text>
+              <Text style={[styles.sumState, ready ? { color: bf.good } : null]}>{ready ? 'READY' : 'PENDING'}</Text>
+            </View>
+            <SumRow k="SERVICE" v={service?.name} />
+            <SumRow k="DATE" v={date ? fmtDate(date) : undefined} />
+            <SumRow k="TIME" v={time ? `${fmtTime(time, timeFormat)}${service ? ` · ${durationLabel(service, time)}` : ''}` : undefined} />
+            {maidId && <SumRow k="CLEANER" v={maids.find(m => m.id === maidId)?.label} />}
+            {stepIdx >= 2 && <SumRow k="WHERE" v={chosen ? [chosen.unit_number, chosen.address].filter(Boolean).join(', ') : [addr.unit, addr.address].filter(Boolean).join(', ') || undefined} />}
+            {price?.slotPrice != null && <SumRow k="TOTAL" v={money(total)} strong />}
+          </View>
         )}
       </ScrollView>
+
+      {/* Bottom bar: Back · Continue (ink) / Pay (accent) — web bf-foot */}
+      {stepIdx >= 0 && (
+        <View style={styles.foot}>
+          <Pressable onPress={back} disabled={stepIdx === 0} style={[styles.back, stepIdx === 0 ? { opacity: 0.3 } : null]} hitSlop={8}>
+            <ArrowLeft size={16} color={bf.muted} />
+            <Text style={styles.backText}>Back</Text>
+          </Pressable>
+          {step === 'confirm' ? (
+            <Pressable onPress={submit} disabled={busy} style={[styles.cont, styles.contAccent, busy ? { opacity: 0.5 } : null]}>
+              {busy ? <ActivityIndicator color="#fff" /> : <><Text style={styles.contText}>{payLabel}</Text><ArrowRight size={16} color="#fff" /></>}
+            </Pressable>
+          ) : (
+            <Pressable onPress={next} disabled={!canNext} style={[styles.cont, !canNext ? { opacity: 0.4 } : null]}>
+              <Text style={styles.contText}>Continue</Text>
+              <ArrowRight size={16} color="#fff" />
+            </Pressable>
+          )}
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 function Center({ children }: { children: React.ReactNode }) {
-  const c = useColors();
-  return <View style={{ flex: 1, justifyContent: 'center', padding: 24, backgroundColor: c.bg }}>{children}</View>;
+  return <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 12, backgroundColor: bf.ground }}>{children}</View>;
+}
+
+function SumRow({ k, v, strong }: { k: string; v?: string; strong?: boolean }) {
+  return (
+    <View style={styles.sumRow}>
+      <Text style={styles.sumKey}>{k}</Text>
+      <Text style={[styles.sumVal, !v ? styles.sumEmpty : null, strong ? { fontWeight: '700', fontStyle: 'normal' } : null]} numberOfLines={2}>{v ?? 'Not picked yet'}</Text>
+    </View>
+  );
 }
 
 function Line({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
-  const c = useColors();
-  const st = { color: c.text, fontSize: 16, fontWeight: bold ? ('700' as const) : ('400' as const) };
+  const st = { color: bf.ink, fontSize: 15, fontWeight: bold ? ('700' as const) : ('400' as const) };
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
       <Text style={[st, { flexShrink: 1 }]}>{label}</Text>
@@ -535,14 +593,65 @@ function Line({ label, value, bold }: { label: string; value: string; bold?: boo
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 8, minHeight: 32 },
-  content: { padding: 20, gap: 12, paddingBottom: 48 },
-  h1: { fontSize: 26, fontWeight: '700', marginBottom: 4 },
-  section: { fontSize: 12, fontWeight: '700', letterSpacing: 0.8, marginTop: 10 },
-  card: { borderRadius: 14, padding: 16, gap: 6, borderWidth: 2 },
-  cardTitle: { fontSize: 18, fontWeight: '700' },
-  addon: { borderRadius: 14, padding: 14, gap: 12, borderWidth: 2, flexDirection: 'row', alignItems: 'center' },
-  day: { width: 64, borderRadius: 14, paddingVertical: 10, alignItems: 'center', gap: 2 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center', minWidth: 92 },
+  root: { flex: 1, backgroundColor: bf.ground },
+  topbar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: bf.line, backgroundColor: bf.paper },
+  wordmark: { width: 110, height: 34 },
+  kicker: { fontSize: 10, fontWeight: '700', letterSpacing: 2.4, color: bf.muted, marginBottom: 4 },
+  stepper: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
+  stepItem: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  dot: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: bf.line, backgroundColor: bf.paper, alignItems: 'center', justifyContent: 'center' },
+  dotOn: { backgroundColor: bf.ink, borderColor: bf.ink },
+  dotText: { fontSize: 11, fontWeight: '700', color: bf.muted },
+  stepLine: { flex: 1, height: 1, backgroundColor: bf.line, marginHorizontal: 6 },
+  content: { paddingHorizontal: 12, paddingBottom: 110, gap: 12 },
+  panel: { backgroundColor: bf.paper, borderWidth: 1, borderColor: bf.line, borderRadius: 14, padding: 18, gap: 10 },
+  h1: { fontSize: 22, fontWeight: '700', color: bf.ink, letterSpacing: -0.4 },
+  sub: { fontSize: 14, color: bf.muted, marginTop: -4, marginBottom: 4 },
+  section: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2, color: bf.muted, marginTop: 10 },
+  svc: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14, backgroundColor: bf.paper, borderWidth: 1, borderColor: bf.line, borderRadius: 10 },
+  svcOn: { borderColor: bf.ink, backgroundColor: bf.raised, shadowColor: bf.ink, shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  svcName: { fontSize: 15, fontWeight: '600', color: bf.ink },
+  svcDesc: { fontSize: 13, color: bf.muted, lineHeight: 18 },
+  svcMeta: { fontSize: 12, color: bf.muted, fontFamily: 'monospace', marginTop: 2 },
+  svcPrice: { fontSize: 13, fontWeight: '700', color: bf.ink, textAlign: 'right' },
+  addonPrice: { fontSize: 13, fontWeight: '600', color: bf.ink, textAlign: 'right' },
+  radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: bf.line, marginTop: 2, alignItems: 'center', justifyContent: 'center' },
+  radioOn: { borderColor: bf.ink },
+  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: bf.ink },
+  box: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: bf.line, marginTop: 2, alignItems: 'center', justifyContent: 'center' },
+  boxOn: { backgroundColor: bf.ink, borderColor: bf.ink },
+  day: { width: 58, borderRadius: 10, paddingVertical: 9, alignItems: 'center', gap: 1, backgroundColor: bf.paper, borderWidth: 1, borderColor: bf.line },
+  dayOn: { backgroundColor: bf.ink, borderColor: bf.ink },
+  dayWk: { fontSize: 10, fontWeight: '600', color: bf.muted, letterSpacing: 0.5 },
+  dayNum: { fontSize: 19, fontWeight: '700', color: bf.ink },
+  times: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  time: { width: '48%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 11, borderWidth: 1, borderColor: bf.line, borderRadius: 6, backgroundColor: bf.paper },
+  timeOn: { backgroundColor: bf.ink, borderColor: bf.ink },
+  timeOff: { backgroundColor: bf.raised },
+  timeText: { fontSize: 14, fontWeight: '500', color: bf.ink },
+  timePrice: { fontSize: 12, color: bf.muted },
+  strike: { color: bf.muted2, textDecorationLine: 'line-through' },
+  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  pill: { paddingHorizontal: 13, paddingVertical: 8, borderWidth: 1, borderColor: bf.line, borderRadius: 999, backgroundColor: bf.paper },
+  pillOn: { backgroundColor: bf.ink, borderColor: bf.ink },
+  pillText: { fontSize: 13, fontWeight: '500', color: bf.ink },
+  note: { fontSize: 12, color: bf.muted, lineHeight: 17 },
+  receipt: { backgroundColor: bf.raised, borderWidth: 1, borderColor: bf.line, borderRadius: 10, padding: 14, gap: 7 },
+  rule: { height: 1, backgroundColor: bf.line, marginVertical: 2 },
+  doneBadge: { width: 48, height: 48, borderRadius: 24, backgroundColor: bf.goodSoft, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
+  summary: { backgroundColor: bf.raised, borderWidth: 1, borderColor: bf.line, borderRadius: 14, padding: 16, gap: 10 },
+  sumHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sumTitle: { fontSize: 15, fontWeight: '700', color: bf.ink },
+  sumState: { fontSize: 11, fontWeight: '700', letterSpacing: 2, color: bf.muted },
+  sumRow: { flexDirection: 'row', gap: 12, borderTopWidth: 1, borderTopColor: bf.line, paddingTop: 9 },
+  sumKey: { width: 76, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, color: bf.muted, fontFamily: 'monospace', paddingTop: 1 },
+  sumVal: { flex: 1, fontSize: 14, color: bf.ink },
+  sumEmpty: { color: bf.muted2, fontStyle: 'italic' },
+  foot: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, backgroundColor: bf.ground, borderTopWidth: 1, borderTopColor: bf.line },
+  back: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  backText: { fontSize: 14, fontWeight: '600', color: bf.muted },
+  cont: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: bf.ink, borderRadius: 8, paddingHorizontal: 18, paddingVertical: 12 },
+  contAccent: { backgroundColor: accent, shadowColor: accent, shadowOpacity: 0.5, shadowRadius: 10, shadowOffset: { width: 0, height: 6 }, elevation: 4 },
+  contText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 });

@@ -13,7 +13,7 @@ import { ApiError } from '@/lib/api';
 import { getInvoice, type InvoiceResponse } from '@/lib/extras';
 import { fmtDate, money } from '@/lib/format';
 import { useSession } from '@/lib/session';
-import { useColors } from '@/lib/theme';
+import { accent, useColors } from '@/lib/theme';
 
 const num = (v: unknown) => Number(v ?? 0) || 0;
 const str = (v: unknown) => (v == null ? '' : String(v));
@@ -77,7 +77,7 @@ export default function Invoice() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  if (q.isPending) return <ActivityIndicator style={{ marginTop: 40 }} color={tenant.primaryColor} />;
+  if (q.isPending) return <ActivityIndicator style={{ marginTop: 40 }} color={accent} />;
   if (q.isError) {
     const none = q.error instanceof ApiError && q.error.code === 'no_invoice';
     return (

@@ -14,3 +14,4 @@ google-services.json
 .DS_Store
 expo-env.d.ts
 apps/customer/assets/tenant/
+design/

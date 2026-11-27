@@ -4,16 +4,16 @@ import { useMemo, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Badge, progressOf } from '@/components/BookingCard';
+import { SectionLabel, WCard } from '@/components/web';
 import { AddExtras, PayBalance, Photos, Review, VanPills } from '@/components/booking/Extras';
 import { Notice } from '@/components/ui';
-import { tenant } from '@/config/tenant';
 import { cancelBooking, type CustomerBooking } from '@/lib/api';
 import { canHaveInvoice } from '@/lib/extras';
 import { fmtDate, fmtStamp, fmtTime, money, todayIso, wallClockToUtcMs } from '@/lib/format';
 import { queryClient, useBookings, useProfile } from '@/lib/queries';
 import { useSession } from '@/lib/session';
 import { useDisplaySettings, type DisplaySettings } from '@/lib/settings';
-import { useColors } from '@/lib/theme';
+import { accent, gray, useColors } from '@/lib/theme';
 
 const isPaid = (b: CustomerBooking) => b.payment_status === 'paid' || b.payment_status === 'cash';
 
@@ -52,7 +52,7 @@ export default function BookingDetail() {
 
   if (!b) {
     return (
-      <View style={[styles.root, { backgroundColor: c.bg, padding: 20 }]}>
+      <View style={[styles.root, { backgroundColor: gray[50], padding: 20 }]}>
         <Stack.Screen options={{ title: 'Booking' }} />
         <Text style={{ color: c.muted }}>{bookings.isPending ? 'Loading…' : 'This booking could not be found.'}</Text>
       </View>
@@ -97,9 +97,9 @@ export default function BookingDetail() {
 
   return (
     <ScrollView
-      style={{ backgroundColor: c.bg }}
+      style={{ backgroundColor: gray[50] }}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={bookings.isRefetching} onRefresh={() => { bookings.refetch(); }} colors={[tenant.primaryColor]} />}>
+      refreshControl={<RefreshControl refreshing={bookings.isRefetching} onRefresh={() => { bookings.refetch(); }} colors={[accent]} />}>
       <Stack.Screen options={{ title: 'Booking' }} />
 
       <View style={{ gap: 8 }}>
@@ -114,7 +114,7 @@ export default function BookingDetail() {
       {session && <VanPills b={b} token={session.token} />}
       {settings.data?.chatEnabled !== false && (b.chat_open || b.chat_active) && (
         <Pressable onPress={() => router.push({ pathname: '/booking/[id]/chat', params: { id: b.id } })}
-          style={[styles.action, { backgroundColor: tenant.primaryColor }]}>
+          style={[styles.action, { backgroundColor: accent }]}>
           <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>💬 {b.chat_open ? 'Chat with the team' : 'View chat'}</Text>
         </Pressable>
       )}
@@ -160,8 +160,8 @@ export default function BookingDetail() {
 
       {canHaveInvoice(b) && (
         <Pressable onPress={() => router.push({ pathname: '/booking/[id]/invoice', params: { id: b.id } })}
-          style={[styles.action, { borderWidth: 1.5, borderColor: tenant.primaryColor }]}>
-          <Text style={{ color: tenant.primaryColor, fontWeight: '700', fontSize: 16 }}>View invoice</Text>
+          style={[styles.action, { borderWidth: 1.5, borderColor: accent }]}>
+          <Text style={{ color: accent, fontWeight: '700', fontSize: 16 }}>View invoice</Text>
         </Pressable>
       )}
       {session && <AddExtras b={b} token={session.token} />}
@@ -184,12 +184,11 @@ export default function BookingDetail() {
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  const c = useColors();
   return (
-    <View style={[styles.section, { backgroundColor: c.field }]}>
-      <Text style={[styles.sectionTitle, { color: c.muted }]}>{title.toUpperCase()}</Text>
+    <WCard>
+      <SectionLabel>{title}</SectionLabel>
       {children}
-    </View>
+    </WCard>
   );
 }
 
@@ -206,11 +205,11 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { padding: 20, gap: 14, paddingBottom: 48 },
-  h1: { fontSize: 26, fontWeight: '700' },
+  h1: { fontSize: 24, fontWeight: '700', letterSpacing: -0.3 },
   big: { fontSize: 18, fontWeight: '700' },
   section: { borderRadius: 14, padding: 16, gap: 6 },
   sectionTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 0.8, marginBottom: 2 },
   person: { gap: 1, marginBottom: 4 },
   action: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  cancel: { borderWidth: 1.5, borderColor: '#f3b4b4', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 6 },
+  cancel: { borderWidth: 1, borderColor: '#fecaca', backgroundColor: '#fff', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 6 },
 });
