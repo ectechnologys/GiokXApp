@@ -146,6 +146,8 @@ export function BfField({ label, required, locked, textarea, icon, ...input }: {
           editable={!locked}
           multiline={textarea}
           textAlignVertical={textarea ? 'top' : 'center'}
+          // Android shows the END of long single-line text; start from the beginning like the web.
+          selection={locked && !textarea ? { start: 0 } : undefined}
           {...input}
           style={[s.input, textarea && s.textarea, locked && s.inputLocked, icon ? { paddingLeft: 34 } : null, input.style]}
         />

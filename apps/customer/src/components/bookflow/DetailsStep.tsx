@@ -4,6 +4,7 @@
 // not in the app yet — a marked placeholder sits where the map goes.
 import { router } from 'expo-router';
 import { ArrowLeft, Lock, MapPin, Plus } from 'lucide-react-native';
+import { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { SavedAddress } from '@/lib/api';
@@ -11,9 +12,13 @@ import { useT } from '@/lib/i18n';
 import type { CoverageVerdict } from '@/lib/settings';
 import { bf, gray } from '@/lib/theme';
 
+import { AddressSearchField } from '@/components/AddressSearchField';
+import { MapPinPicker } from '@/components/MapPinPicker';
+import { geocode } from '@/lib/places';
+
 import { BfField, FsetHead, Kicker, mono, StepHead } from './atoms';
 
-export interface AddrDraft { unit: string; address: string; postcode: string; city: string; lobby: string }
+export interface AddrDraft { unit: string; address: string; postcode: string; city: string; lobby: string; lat?: number | null; lng?: number | null }
 
 const cap = (v: string) => v.replace(/[a-zA-Z]+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 
@@ -39,7 +44,20 @@ export function DetailsStep({ firstName, saved, addrId, onPick, onUseNew, draft,
     : draft;
   const set = (k: keyof AddrDraft, val: string) => setDraft({ ...draft, [k]: val });
   const addrLine = (a: SavedAddress) => [a.unit_number, a.address].filter(Boolean).join(', ') || a.address || t('Saved address');
-  const lat = chosen?.lat, lng = chosen?.lng;
+  const lat = chosen ? chosen.lat : draft.lat, lng = chosen ? chosen.lng : draft.lng;
+  // Web: a typed unit + street finds the pin (new address only).
+  const picked = useRef(false);
+  useEffect(() => {
+    if (locked) return;
+    if (picked.current) { picked.current = false; return; }
+    if (!draft.unit.trim() || !draft.address.trim()) return;
+    const h = setTimeout(async () => {
+      const q = [draft.unit.trim(), draft.address.trim(), draft.postcode.trim(), draft.city.trim(), 'Malaysia'].filter(Boolean).join(', ');
+      const c = await geocode(q).catch(() => null);
+      if (c) setDraft({ ...draft, lat: c.lat, lng: c.lng });
+    }, 700);
+    return () => clearTimeout(h);
+  }, [draft.unit, draft.address]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <View>
@@ -102,28 +120,19 @@ export function DetailsStep({ firstName, saved, addrId, onPick, onUseNew, draft,
         <FsetHead label={t('Address')} />
         <BfField label={t('Unit / House No.')} required locked={locked} value={v.unit} placeholder="A-12-34"
           onChangeText={x => set('unit', cap(x))} />
-        <BfField label={t('Street & building')} required locked={locked} value={v.address} placeholder={t('Street address')}
-          icon={<MapPin size={16} color={bf.muted2} strokeWidth={2} />} onChangeText={x => set('address', x)} />
+        {locked ? (
+          <BfField label={t('Street & building')} required locked value={v.address} placeholder={t('Street address')}
+            icon={<MapPin size={16} color={bf.muted2} strokeWidth={2} />} onChangeText={x => set('address', x)} />
+        ) : (
+          <AddressSearchField label={t('Street & building')} required value={v.address} onChangeText={x => set('address', x)}
+            onPick={p => { picked.current = true; setDraft({ ...draft, address: p.address, postcode: p.postcode, city: p.city, lat: p.lat, lng: p.lng }); }} />
+        )}
         <BfField label={t('City')} locked={locked} value={v.city} placeholder="Kuala Lumpur" onChangeText={x => set('city', x)} />
         <BfField label={t('Postcode')} locked={locked} value={v.postcode} placeholder="50460" keyboardType="number-pad"
           onChangeText={x => set('postcode', x)} />
 
-        {/* MAP PLACEHOLDER — the web shows MapPinPicker here (Google map,
-            160px, centred drag pin) whenever the address has coordinates.
-            The map itself is not built in the app yet; the frame and the
-            coordinates line under it match the web. */}
-        {lat != null && lng != null && (
-          <View style={st.map}>
-            <View style={st.mapArea}>
-              <MapPin size={28} color={gray[300]} strokeWidth={1.5} />
-              <Text style={st.mapText}>Map coming soon</Text>
-            </View>
-            <View style={st.mapFoot}>
-              <MapPin size={12} color={gray[400]} />
-              <Text style={st.mapPin}>{`${lat.toFixed(6)}, ${lng.toFixed(6)}`}</Text>
-            </View>
-          </View>
-        )}
+        <MapPinPicker coords={lat != null && lng != null ? { lat, lng } : null} height={160} locked={locked}
+          onCoordsChange={c => setDraft({ ...draft, lat: c.lat, lng: c.lng })} />
 
         {coverage && <CoverageNote v={coverage} />}
 

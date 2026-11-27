@@ -52,3 +52,13 @@ Company images live in `tenants/<slug>/`: `icon.png` (1024², launcher + in-app
 logo), `adaptive-icon.png` / `adaptive-icon-monochrome.png` (logo on transparent,
 inside the middle ~64%), `splash.png` (square, logo within the middle ~60%), plus
 `iconBackground` in `tenant.json`.
+
+## Google Maps key (per company, not in git)
+
+Each company's map / address-search key lives in `apps/customer/tenants/<slug>/keys.json` (git-ignored):
+
+```json
+{ "googleMapsKey": "…", "androidCertSha1": "SHA-1 of the signing key, no colons" }
+```
+
+The key is restricted in Google Cloud to Android apps (package + SHA-1) and to Maps SDK for Android, Places API (New) and Geocoding API. When the app gets a new signing key (Play upload key, Play app signing), add its SHA-1 to the key in Google Cloud and update `androidCertSha1`.

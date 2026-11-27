@@ -27,6 +27,11 @@ export interface TenantConfig {
   accent?: string;
   /** Adaptive-icon background behind the logo (default: primaryColor). */
   iconBackground?: string;
+  /** Google Maps key restricted to this Android app (map, address search, geocoding). */
+  googleMapsKey?: string;
+  /** SHA-1 of the key the APK is signed with, sent with Google web-service
+   *  calls so the Android-app restriction on the key accepts them. */
+  androidCertSha1?: string;
   version: string;
 }
 
@@ -36,7 +41,12 @@ const file = path.join(dir, 'tenant.json');
 if (!fs.existsSync(file)) {
   throw new Error(`Unknown tenant "${slug}": ${file} does not exist.`);
 }
-const tenant: TenantConfig = JSON.parse(fs.readFileSync(file, 'utf8'));
+// keys.json (git-ignored) holds the company's API keys, kept out of the repo.
+const keysFile = path.join(dir, 'keys.json');
+const tenant: TenantConfig = {
+  ...JSON.parse(fs.readFileSync(file, 'utf8')),
+  ...(fs.existsSync(keysFile) ? JSON.parse(fs.readFileSync(keysFile, 'utf8')) : {}),
+};
 
 // The screens show the company's logo too. Metro can only bundle images it
 // can see at a fixed path, so the tenant's icon is copied to assets/tenant/
@@ -95,6 +105,7 @@ const config: ExpoConfig = {
         locationWhenInUsePermission: `${tenant.name} uses your location to fill in your address so our team can find you.`,
       },
     ],
+    ['react-native-maps', { androidGoogleMapsApiKey: tenant.googleMapsKey }],
     [
       'expo-splash-screen',
       {

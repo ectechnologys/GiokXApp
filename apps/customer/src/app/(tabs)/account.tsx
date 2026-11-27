@@ -2,13 +2,16 @@
 // phone), every saved address editable (first = Primary), Add another address,
 // and the sticky "Nothing to save / Save changes" bar.
 import { Crosshair, Lock, MapPin, Plus, Save, Trash2, User } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { AddressSearchField } from '@/components/AddressSearchField';
 import { AppHeader } from '@/components/AppHeader';
+import { MapPinPicker } from '@/components/MapPinPicker';
 import { InfoCard } from '@/components/web';
 import { callFunction, updateProfile, type SavedAddress } from '@/lib/api';
 import { currentAddress } from '@/lib/location';
+import { geocode } from '@/lib/places';
 import { useT } from '@/lib/i18n';
 import { queryClient, useProfile } from '@/lib/queries';
 import { useSession } from '@/lib/session';
@@ -71,6 +74,21 @@ function AddressCard({ a, primary, verdict, onChange, onDelete }: {
       setLocating(false);
     }
   };
+  // Web: a typed unit + address (changed from what was saved) re-finds the pin.
+  const initial = useRef({ unit: a.unit_number, address: a.address });
+  const picked = useRef(false);
+  useEffect(() => {
+    if (picked.current) { picked.current = false; return; }
+    if (!a.unit_number.trim() || !a.address.trim()) return;
+    if (a.unit_number === initial.current.unit && a.address === initial.current.address) return;
+    const h = setTimeout(async () => {
+      const q = [a.unit_number.trim(), a.address.trim(), a.postcode.trim(), a.city.trim(), 'Malaysia'].filter(Boolean).join(', ');
+      const c = await geocode(q).catch(() => null);
+      if (c) onChange({ lat: c.lat, lng: c.lng });
+    }, 700);
+    return () => clearTimeout(h);
+  }, [a.unit_number, a.address]); // eslint-disable-line react-hooks/exhaustive-deps
+  const coords = a.lat != null && a.lng != null ? { lat: a.lat, lng: a.lng } : null;
   return (
     <View style={styles.addrCard}>
       <View style={styles.addrHead}>
@@ -83,24 +101,21 @@ function AddressCard({ a, primary, verdict, onChange, onDelete }: {
       </View>
       {primary && <Text style={styles.addrHint}>{t('Booking pre-fills from this one. Edit, drag the pin, or pick a new place via the search field.')}</Text>}
       <Field label={t('Unit / House No.')} value={a.unit_number} onText={v => onChange({ unit_number: titleCase(v) })} placeholder="A-12-34" />
-      <Field label={t('Address')} value={a.address} onText={v => onChange({ address: v })} placeholder={t('Street, area')}
-        icon={<MapPin size={16} color={bf.muted2} />} />
+      <AddressSearchField label={t('Address')} value={a.address} onChangeText={v => onChange({ address: v })}
+        onPick={p => { picked.current = true; onChange({ address: p.address, postcode: p.postcode, city: p.city, lat: p.lat, lng: p.lng }); }} />
       <View style={{ flexDirection: 'row', gap: 12 }}>
         <View style={{ flex: 1 }}><Field label={t('Postcode')} value={a.postcode} onText={v => onChange({ postcode: v.replace(/\D/g, '') })} keyboardType="number-pad" maxLength={6} /></View>
         <View style={{ flex: 1 }}><Field label={t('City')} value={a.city} onText={v => onChange({ city: v })} /></View>
       </View>
       <Field label={t('Lobby / guard notes (optional)')} value={a.lobby_note} onText={v => onChange({ lobby_note: titleCase(v) })}
         placeholder={t('e.g. Tower B Side Entrance, Ask Guard For #123')} />
-      <View style={styles.pinBox}>
-        <Pressable onPress={locate} disabled={locating} style={styles.pinBtn}>
+      <MapPinPicker coords={coords} onCoordsChange={c => onChange({ lat: c.lat, lng: c.lng })} />
+      {!coords && (
+        <Pressable onPress={locate} disabled={locating} style={styles.locBtn}>
           {locating ? <ActivityIndicator size="small" color={accent} /> : <Crosshair size={14} color={accent} strokeWidth={2.5} />}
-          <Text style={styles.pinBtnText}>{a.lat != null ? t('Move pin to my location') : t('Use my current location')}</Text>
+          <Text style={styles.pinBtnText}>{t('Use my current location')}</Text>
         </Pressable>
-        <View style={styles.pinRow}>
-          <MapPin size={14} color={bf.muted} />
-          <Text style={styles.coords}>{a.lat != null && a.lng != null ? `${a.lat.toFixed(6)}, ${a.lng.toFixed(6)}` : t('No map pin yet')}</Text>
-        </View>
-      </View>
+      )}
       {err && <Text style={{ fontSize: 11, color: '#dc2626' }}>{err}</Text>}
       <CoverageNote verdict={verdict} />
     </View>
@@ -254,6 +269,7 @@ const styles = StyleSheet.create({
   remove: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4 },
   removeText: { fontSize: 11, fontWeight: '600', color: gray[400] },
   addrHint: { fontSize: 11, color: gray[500], lineHeight: 16 },
+  locBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderWidth: 1, borderColor: bf.line, borderRadius: 10, backgroundColor: '#fff' },
   pinBox: { borderWidth: 1, borderColor: bf.line, borderRadius: 12, overflow: 'hidden', backgroundColor: bf.raised },
   pinBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: bf.line },
   pinBtnText: { fontSize: 13, fontWeight: '600', color: accent },

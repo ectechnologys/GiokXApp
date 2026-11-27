@@ -4,7 +4,8 @@
 import { Tabs, router } from 'expo-router';
 import { CalendarDays, CalendarPlus, Coins, MessageCircle, User } from 'lucide-react-native';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useT } from '@/lib/i18n';
@@ -33,11 +34,19 @@ export default function TabsLayout() {
   const chatOn = useDisplaySettings().data?.chatEnabled !== false;
   const pointsName = coins?.points_name ?? '';
   const pointsShort = pointsName.split(' ').filter(Boolean).slice(-1)[0] || pointsName;
+  // The web bar sits under the keyboard; here it would ride on top of it.
+  const [kb, setKb] = useState(false);
+  useEffect(() => {
+    const a = Keyboard.addListener('keyboardDidShow', () => setKb(true));
+    const b = Keyboard.addListener('keyboardDidHide', () => setKb(false));
+    return () => { a.remove(); b.remove(); };
+  }, []);
 
   return (
     <Tabs
       screenOptions={{ headerShown: false }}
       tabBar={({ state, navigateToTab }) => {
+        if (kb) return null;
         const current = state.routes[state.index]?.name;
         const go = (name: string) => { const r = state.routes.find(x => x.name === name); if (r) navigateToTab(r.key); };
         return (

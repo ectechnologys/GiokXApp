@@ -211,8 +211,9 @@ export default function Book() {
     ? { unit: chosen.unit_number ?? '', address: chosen.address ?? '', postcode: chosen.postcode ?? '', city: chosen.city ?? '', lobby: chosen.lobby_note ?? '' }
     : draft;
   const coverageCfg = display?.coverage;
-  const coverage = coverageCfg?.enforce_booking === true && chosen?.lat != null && chosen?.lng != null
-    ? judgeCoverage(coverageCfg, { lat: chosen.lat, lng: chosen.lng })
+  const pinLat = chosen ? chosen.lat : draft.lat, pinLng = chosen ? chosen.lng : draft.lng;
+  const coverage = coverageCfg?.enforce_booking === true && pinLat != null && pinLng != null
+    ? judgeCoverage(coverageCfg, { lat: pinLat, lng: pinLng })
     : null;
   const coverageBlocked = coverage !== null && coverage.kind !== 'covered';
   const addressOk = !!addr.unit.trim() && !!addr.address.trim() && !coverageBlocked;
@@ -255,8 +256,8 @@ export default function Book() {
     address: addr.address.trim(),
     city: addr.city.trim() || undefined,
     postcode: addr.postcode.trim() || undefined,
-    address_lat: chosen?.lat ?? null,
-    address_lng: chosen?.lng ?? null,
+    address_lat: pinLat ?? null,
+    address_lng: pinLng ?? null,
     lobby_note: addr.lobby.trim() || undefined,
     requested_maid_id: maidId,
   });
