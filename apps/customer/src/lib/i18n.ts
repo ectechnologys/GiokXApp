@@ -17,7 +17,7 @@ const ALL: Record<string, string> = { ...ZH_SITE, ...ZH_LOGIN, ...ZH_BOOKING, ..
 
 const KEY = `lang_${tenant.slug}`;
 let chosen: Lang = 'en';
-let allowed = true;
+let allowed = false; // until the company says 中文 is on (no flash of the switch)
 let current: Lang = 'en';
 const subs = new Set<() => void>();
 const emit = () => subs.forEach(f => f());
@@ -34,8 +34,8 @@ export function loadLangConfig() {
   asked = true;
   callFunction<{ chineseEnabled?: boolean }>('public-booking-config', {})
     .then(cfg => {
-      if (typeof cfg?.chineseEnabled !== 'boolean' || cfg.chineseEnabled === allowed) return;
-      allowed = cfg.chineseEnabled;
+      if (cfg?.chineseEnabled !== true || allowed) return;
+      allowed = true;
       current = allowed ? chosen : 'en';
       emit();
     })
