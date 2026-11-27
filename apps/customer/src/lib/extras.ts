@@ -252,3 +252,50 @@ export const canHaveInvoice = (b: { status: string; payment_status: string; outs
     || (b.payment_status === 'redemption' && !(b.outstanding_amount > 0))
     || (b.status === 'cancelled' && settled);
 };
+
+// ── Points reload (top-up) ───────────────────────────────────────────────────
+
+export interface ReloadConfig {
+  enabled: boolean;
+  tiers: { amount: number; bonus: number }[];
+  custom_enabled: boolean;
+  custom_min: number;
+  bonus_note?: 'member_only' | 'non_member_only' | null;
+}
+
+/** HitPay checkout for buying points; the bonus is worked out by the server. */
+export const startPointsReload = (token: string, amount: number) =>
+  postJson<{ ok: true; checkout_url: string; hold_token: string; bonus: number }>('points-reload-start', token, { return_origin: returnOrigin, amount });
+
+// ── Customer Service chat (general enquiry, web customer-support) ────────────
+
+export interface SupportThread {
+  id: string;
+  booking_id: string | null;
+  subject: string;
+  status: 'pending' | 'open' | 'closed';
+  created_at: string;
+  opened_at: string | null;
+  last_message_at: string | null;
+}
+
+export async function supportList(token: string): Promise<{ allowed: boolean; thread: SupportThread | null; messages: ChatMessage[] }> {
+  const d = await postJson<{ allowed?: boolean; thread?: SupportThread | null; messages?: ChatMessage[] }>('customer-support', token, { action: 'list' });
+  return { allowed: d.allowed !== false, thread: d.thread ?? null, messages: d.messages ?? [] };
+}
+
+/** Ask the business to open a chat (sits as a request until they do). */
+export const supportRequest = (token: string, body: string, bookingId?: string | null) =>
+  postJson<{ thread: SupportThread; messages?: ChatMessage[] }>('customer-support', token, { action: 'request', body, booking_id: bookingId ?? null });
+
+export const supportSend = (token: string, threadId: string, body: string, messageId: string) =>
+  postJson<{ message: ChatMessage }>('customer-support', token, { action: 'send', thread_id: threadId, body, message_id: messageId });
+
+export function supportSendImage(token: string, threadId: string, f: { uri: string; name: string }, messageId: string) {
+  const form = new FormData();
+  form.append('action', 'send-image');
+  form.append('thread_id', threadId);
+  form.append('message_id', messageId);
+  form.append('file', filePart(f));
+  return postForm<{ message: ChatMessage }>('customer-support', token, form);
+}

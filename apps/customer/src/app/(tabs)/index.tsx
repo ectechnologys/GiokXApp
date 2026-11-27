@@ -1,86 +1,137 @@
-// My bookings: hero + Upcoming (soonest first) / Past / Cancelled — the web
-// /account page's header and Appointments card.
-import { router } from 'expo-router';
-import { CalendarPlus } from 'lucide-react-native';
-import { useMemo } from 'react';
-import { ActivityIndicator, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+// Appt. tab — the web /account "My appointments" card: Upcoming (sort toggle),
+// Past and Cancelled, each row with its own actions.
+import { useQuery } from '@tanstack/react-query';
+import { ArrowUpDown, CalendarDays, ChevronRight, Star } from 'lucide-react-native';
+import { useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { BookingCard } from '@/components/BookingCard';
-import { Notice, PrimaryButton } from '@/components/ui';
-import { Hero, SectionLabel } from '@/components/web';
-import type { CustomerBooking } from '@/lib/api';
+import { AppHeader } from '@/components/AppHeader';
+import { BookingRow } from '@/components/BookingRow';
+import { Notice } from '@/components/ui';
+import { PageCard } from '@/components/web';
+import { canCancel, useCancelBooking } from '@/lib/cancel';
+import { myReviews } from '@/lib/extras';
 import { todayIso } from '@/lib/format';
-import { useBookings, useProfile } from '@/lib/queries';
+import { useT } from '@/lib/i18n';
+import { useBookings, useCoins, useProfile } from '@/lib/queries';
 import { useSession } from '@/lib/session';
 import { useDisplaySettings } from '@/lib/settings';
-import { accent, gray } from '@/lib/theme';
+import { tenant } from '@/config/tenant';
+import { accent, accentDeep, accentSoft, accentTint, bf, gray } from '@/lib/theme';
 
-export default function Bookings() {
+export default function Appointments() {
+  const { t } = useT();
   const { session } = useSession();
+  const token = session!.token;
   const q = useBookings();
   const profile = useProfile().data?.customer;
-  const timeFormat = useDisplaySettings().data?.timeFormat ?? '12h';
+  const settings = useDisplaySettings().data;
+  const pointsName = useCoins().data?.points_name ?? '';
+  const timeFormat = settings?.timeFormat ?? '12h';
+  const reviewsOn = settings?.reviews?.enabled !== false;
+  const reviews = useQuery({ queryKey: ['my-reviews'], queryFn: () => myReviews(token), enabled: reviewsOn });
+  const cancel = useCancelBooking(token, settings, profile, pointsName);
+  const [sort, setSort] = useState<'soonest' | 'latest'>('soonest');
+  const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const rowY = useRef<Record<string, number>>({});
   const today = todayIso();
 
-  const sections = useMemo(() => {
-    const all = q.data ?? [];
-    const active = all.filter(b => b.status !== 'cancelled');
-    return [
-      { title: 'Upcoming', data: active.filter(b => b.booking_date >= today).reverse() }, // server: newest first
-      { title: 'Past', data: active.filter(b => b.booking_date < today) },
-      { title: 'Cancelled', data: all.filter(b => b.status === 'cancelled') },
-    ].filter(s => s.data.length > 0);
-  }, [q.data, today]);
+  const all = useMemo(() => q.data ?? [], [q.data]);
+  const cancelled = all.filter(b => b.status === 'cancelled');
+  const active = all.filter(b => b.status !== 'cancelled');
+  const upcomingBase = active.filter(b => b.booking_date >= today);
+  const upcoming = sort === 'soonest' ? [...upcomingBase].reverse() : upcomingBase;
+  const past = active.filter(b => b.booking_date < today);
+  const reviewBy = Object.fromEntries((reviews.data ?? []).map(r => [r.appointment_id, r]));
+  const pendingReviews = reviewsOn && settings?.reviews?.nudge !== false
+    ? all.filter(b => b.team_completed_at && b.status !== 'cancelled' && !reviewBy[b.id]) : [];
 
-  const member = profile?.is_member
-    ? { active: !!profile.member_expires && profile.member_expires.slice(0, 10) >= today, start: profile.member_start, expires: profile.member_expires }
-    : null;
+  const row = (b: (typeof all)[number], opts: { muted?: boolean; cancellable?: boolean }) => (
+    <View key={b.id} onLayout={e => { rowY.current[b.id] = e.nativeEvent.layout.y; }}>
+      <BookingRow b={b} token={token} timeFormat={timeFormat} muted={opts.muted} chatOn={settings?.chatEnabled !== false}
+        onCancel={opts.cancellable && canCancel(b) ? cancel.confirm : undefined} cancelling={cancel.busyId === b.id}
+        review={reviewBy[b.id]} googleUrl={settings?.reviews?.googleUrl} googleThreshold={settings?.reviews?.googleThreshold} tenantName={tenant.name} />
+    </View>
+  );
 
   return (
-    <SafeAreaView edges={['top']} style={styles.root}>
-      <SectionList<CustomerBooking>
-        sections={sections}
-        keyExtractor={b => b.id}
-        contentContainerStyle={styles.list}
-        stickySectionHeadersEnabled={false}
-        refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => { q.refetch(); }} colors={[accent]} />}
-        ListHeaderComponent={
-          <View style={{ gap: 18, marginBottom: 6 }}>
-            <Hero name={profile?.name ?? session?.customer.name ?? ''} phone={profile?.phone_e164 ?? session?.customer.phone_e164} member={member} />
-            <Text style={styles.h2}>Appointments</Text>
+    <View style={{ flex: 1, backgroundColor: bf.ground }}>
+      <AppHeader />
+      <ScrollView ref={scroll} contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => { q.refetch(); reviews.refetch(); }} colors={[accent]} />}>
+        {cancel.msg && <Notice tone={cancel.msg.tone}>{cancel.msg.text}</Notice>}
+        <PageCard>
+          <View style={styles.head}>
+            <View style={styles.icon}><CalendarDays size={16} color={accent} /></View>
+            <Text style={styles.h2}>{t('My appointments')}</Text>
+            <Text style={styles.count}>· {t('{n} total', { n: all.length })}</Text>
           </View>
-        }
-        renderSectionHeader={({ section }) => <SectionLabel style={{ marginTop: 14, marginBottom: 8 }}>{section.title}</SectionLabel>}
-        renderItem={({ item, section }) => <BookingCard b={item} timeFormat={timeFormat} muted={section.title === 'Past'} />}
-        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-        ListEmptyComponent={
-          q.isPending ? (
-            <ActivityIndicator style={{ marginTop: 40 }} color={accent} />
+
+          {q.isPending ? (
+            <ActivityIndicator style={{ marginTop: 16 }} color={accent} />
           ) : q.isError ? (
-            <Notice tone="error">{`Couldn’t load your bookings: ${(q.error as Error).message}`}</Notice>
+            <View style={{ marginTop: 16 }}><Notice tone="error">{(q.error as Error).message}</Notice></View>
+          ) : all.length === 0 ? (
+            <Text style={styles.empty}>{t('No appointments yet — your past and upcoming bookings will show here.')}</Text>
           ) : (
-            <View style={styles.empty}>
-              <View style={styles.emptyIcon}><CalendarPlus size={22} color={accent} /></View>
-              <Text style={styles.emptyTitle}>No bookings yet</Text>
-              <Text style={styles.emptyText}>Book your first cleaning and it will show up here.</Text>
-              <View style={{ alignSelf: 'stretch' }}>
-                <PrimaryButton label="Book a cleaning" onPress={() => router.navigate('/book')} />
-              </View>
+            <View style={{ marginTop: 16, gap: 20 }}>
+              {pendingReviews.length > 0 && (
+                <Pressable onPress={() => scroll.current?.scrollTo({ y: Math.max(0, (rowY.current[pendingReviews[0].id] ?? 0)), animated: true })} style={styles.nudge}>
+                  <View style={styles.nudgeIcon}><Star size={16} color={accentDeep} strokeWidth={2.5} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.nudgeTitle}>{pendingReviews.length === 1 ? t('How was your service?') : t('How was your {n} recent services?', { n: pendingReviews.length })}</Text>
+                    <Text style={styles.nudgeSub}>{t('Tap to leave a quick rating — it only takes a second.')}</Text>
+                  </View>
+                  <ChevronRight size={16} color={accentDeep} strokeWidth={2.5} />
+                </Pressable>
+              )}
+              {upcoming.length > 0 && (
+                <View>
+                  <View style={styles.groupHead}>
+                    <Text style={styles.group}>{`${t('Upcoming')} · ${upcoming.length}`.toUpperCase()}</Text>
+                    {upcoming.length > 1 && (
+                      <Pressable onPress={() => setSort(s => (s === 'soonest' ? 'latest' : 'soonest'))} style={styles.sort} hitSlop={8}>
+                        <ArrowUpDown size={12} color={gray[500]} strokeWidth={2.5} />
+                        <Text style={styles.sortText}>{sort === 'soonest' ? t('Soonest first') : t('Latest first')}</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                  <View style={{ gap: 8 }}>{upcoming.map(b => row(b, { cancellable: true }))}</View>
+                </View>
+              )}
+              {past.length > 0 && (
+                <View>
+                  <Text style={[styles.group, { marginBottom: 8 }]}>{`${t('Past')} · ${past.length}`.toUpperCase()}</Text>
+                  <View style={{ gap: 8 }}>{past.map(b => row(b, { muted: true }))}</View>
+                </View>
+              )}
+              {cancelled.length > 0 && (
+                <View>
+                  <Text style={[styles.group, { marginBottom: 8 }]}>{`${t('Cancelled')} · ${cancelled.length}`.toUpperCase()}</Text>
+                  <View style={{ gap: 8 }}>{cancelled.map(b => row(b, {}))}</View>
+                </View>
+              )}
             </View>
-          )
-        }
-      />
-    </SafeAreaView>
+          )}
+        </PageCard>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: gray[50] },
-  list: { padding: 16, paddingBottom: 40 },
-  h2: { fontSize: 17, fontWeight: '700', color: gray[900], letterSpacing: -0.2 },
-  empty: { alignItems: 'center', gap: 8, marginTop: 12, backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: gray[100], padding: 24 },
-  emptyIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(195,164,111,0.14)' },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: gray[900] },
-  emptyText: { color: gray[500], textAlign: 'center', marginBottom: 6 },
+  content: { padding: 16, paddingTop: 24, paddingBottom: 32, gap: 20 },
+  head: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  icon: { width: 28, height: 28, borderRadius: 8, backgroundColor: accentSoft, alignItems: 'center', justifyContent: 'center' },
+  h2: { fontSize: 14, fontWeight: '700', color: gray[900], letterSpacing: -0.2 },
+  count: { fontSize: 11, color: gray[400], fontWeight: '500' },
+  empty: { fontSize: 12, color: gray[400], backgroundColor: gray[50], borderWidth: 1, borderColor: gray[100], borderRadius: 8, paddingHorizontal: 12, paddingVertical: 16, textAlign: 'center', marginTop: 16 },
+  groupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  group: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, color: gray[400] },
+  sort: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  sortText: { fontSize: 10, fontWeight: '600', color: gray[500] },
+  nudge: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: accentTint, borderWidth: 1, borderColor: accentSoft },
+  nudgeIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: accentSoft, alignItems: 'center', justifyContent: 'center' },
+  nudgeTitle: { fontSize: 14, fontWeight: '700', color: accentDeep },
+  nudgeSub: { fontSize: 12, color: gray[500] },
 });

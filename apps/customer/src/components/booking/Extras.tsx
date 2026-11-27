@@ -32,7 +32,7 @@ export function Card({ title, children }: { title: string; children: React.React
 }
 
 /** Runs a HitPay checkout and reports the outcome; one in flight at a time. */
-function usePayment(token: string) {
+export function usePayment(token: string) {
   const [waiting, setWaiting] = useState(false);
   const cancelled = useRef(false);
   const run = async (start: () => Promise<{ checkout_url?: string; hold_token?: string; free?: boolean }>) => {
@@ -95,9 +95,10 @@ export function PayBalance({ b, token }: { b: CustomerBooking; token: string }) 
 
 // ── Add extras to this booking ───────────────────────────────────────────────
 
-export function AddExtras({ b, token }: { b: CustomerBooking; token: string }) {
+export function AddExtras({ b, token, startOpen, onDone }: { b: CustomerBooking; token: string; startOpen?: boolean; onDone?: () => void }) {
   const c = useColors();
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(!!startOpen);
+  const setOpen = (v: boolean) => { setOpenState(v); if (!v) onDone?.(); };
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);

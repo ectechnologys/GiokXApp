@@ -1,0 +1,140 @@
+// Simplified Chinese for the customer pages (login). Key = the exact English text
+// passed to t(); value = 简体中文. A missing key falls back to the English.
+// Covers CustomerLoginPage, PhoneInput, SignupCelebration, MapPinPicker and the
+// customer-auth error messages shown on them.
+export const ZH_LOGIN: Record<string, string> = {
+  // Page shell
+  'Site not found': '找不到此网站',
+  "This web address isn't linked to an active business.": '此网址未连接到任何营业中的商家。',
+  "By continuing you agree to {name}'s terms.": '继续即表示您同意{name}的条款。',
+
+  // Sign in
+  'We’ll text you a one-time code.': '我们会发送一次性验证码给您。',
+  'Enter your phone and password to continue.': '请输入手机号码和密码以继续。',
+  'Phone {phone} verified': '手机 {phone} 已验证',
+  'Code sent to {phone}': '验证码已发送至 {phone}',
+  'Forgot password?': '忘记密码？',
+  'Your password': '您的密码',
+  '6-digit code': '6位数验证码',
+  'Set a new password': '设置新密码',
+  'Choose a new password': '设置新密码',
+  "At least 6 characters — you'll use this to sign in": '至少6个字符，用于以后登录',
+  "You'll use this password on every future sign in.": '以后每次登录都会使用此密码。',
+  'Set up a new password': '设置新密码',
+  'Save password & sign in': '保存密码并登录',
+  'Verify & continue': '验证并继续',
+  "Don't have an account?": '还没有账户？',
+
+  // Code delivery
+  'Sent on WhatsApp — check your WhatsApp messages.': '已通过 WhatsApp 发送，请查看您的 WhatsApp 消息。',
+  'Sent by SMS.': '已通过短信发送。',
+  'Didn’t get it? You can send by SMS in {n}s': '没收到？{n}秒后可改用短信发送',
+  'Didn’t get it? Send by SMS instead': '没收到？改用短信发送',
+  'Could not send the code by SMS': '无法通过短信发送验证码',
+  'Dev mode:': '开发模式：',
+  'code is {code}. No gateway is configured, so nothing was sent.': '验证码是 {code}。尚未配置发送通道，因此没有实际发送。',
+
+  // Phone lookup hints
+  'Account found — go ahead': '已找到账户，请继续',
+  'No account on this number.': '此号码尚未注册账户。',
+  'This phone is already registered.': '此手机号码已注册。',
+  'Sign in instead': '改为登录',
+  "Good to go — we'll create a new account": '可以注册，我们将为您创建新账户',
+
+  // Sign up
+  'Back to sign in': '返回登录',
+  'Create your account': '注册账户',
+  "We'll text a one-time code to verify your phone first.": '我们会先发送一次性验证码，以验证您的手机号码。',
+  'Change phone': '更换手机号码',
+  'Verify your phone': '验证手机号码',
+  'Enter the 6-digit code we sent to {phone}.': '请输入我们发送至 {phone} 的6位数验证码。',
+  'Phone verified': '手机已验证',
+  'Complete your profile': '完善个人资料',
+  "Just a few details to finish — we'll use them on your bookings.": '只需填写几项资料，预约时会用到。',
+  'e.g. Ahmad Razif': '例如：Ahmad Razif',
+  'Race': '种族',
+  'Malay': '马来人',
+  'Chinese': '华人',
+  'Indian': '印度人',
+  'Eurasian': '欧亚裔',
+  'Others': '其他',
+  "No email given. You won't get booking reminders or receipts by email.": '未填写电子邮件，您将不会通过电子邮件收到预约提醒或收据。',
+  'Press {button} to continue without one.': '点击{button}即可直接继续。',
+  'Finish without email': '不填电子邮件，直接完成',
+  'Used for booking reminders and receipts.': '用于发送预约提醒和收据。',
+  'Set a password': '设置密码',
+  'A-12-34 or 56': '例如 A-12-34 或 56',
+  'Finish & go to booking': '完成并前往预约',
+
+  // Address
+  'Start typing an address…': '开始输入地址…',
+  'Street address': '街道地址',
+  'Just enter the building or road name without house unit No.': '只需输入大楼或路名，无需填写门牌号。',
+  'Pick an address above to preview the map.': '在上方选择地址后即可预览地图。',
+  'Lobby / guard notes': '大堂 / 保安备注',
+  'e.g. Main entrance at Block B…': '例如：B座正门…',
+
+  // Map pin picker
+  'Map preview unavailable': '无法显示地图预览',
+  "Your address is still saved — the map just can't be shown here right now.": '您的地址已保存，只是暂时无法在此显示地图。',
+  'Drag map to adjust pin': '拖动地图以调整位置',
+
+  // Phone input
+  'Search country or code…': '搜索国家或区号…',
+  'No country matches': '没有符合的国家',
+  'Detected:': '已识别：',
+  "Paste any format — we'll detect the country from your number.": '任何格式都可以，我们会根据号码自动识别国家。',
+
+  // Sign-up celebration
+  'Account created': '账户已创建',
+  'Welcome aboard, {name}!': '欢迎加入，{name}！',
+  "Your {business} account is ready. Here's what we have on file:": '您的{business}账户已准备就绪。以下是您的资料：',
+  'Default address': '默认地址',
+  'Popular with our customers': '热门服务',
+  '{h}h {m}m': '{h}小时{m}分钟',
+  '{h}h': '{h}小时',
+  '{m}m': '{m}分钟',
+  'from RM {price}': 'RM {price} 起',
+  'Make your first booking': '立即首次预约',
+  'Maybe later — explore the site': '稍后再说，先逛逛网站',
+
+  // Client-side checks (thrown in the page, shown translated)
+  'No account on this number — sign up first.': '此号码尚未注册账户，请先注册。',
+  'Session expired — try again': '会话已过期，请重试',
+  'Password must be at least 6 characters': '密码至少需要6个字符',
+  'This phone is already registered — sign in instead.': '此手机号码已注册，请直接登录。',
+  'Phone missing': '缺少手机号码',
+  'Wrong code': '验证码错误',
+  'Session lost — try again': '会话已失效，请重试',
+  'Enter your name': '请输入您的姓名',
+  'Select your race': '请选择您的种族',
+  'Enter your unit / house number': '请输入门牌号',
+  'Enter your address': '请输入您的地址',
+  'Enter a valid email': '请输入有效的电子邮件',
+  'Enter your email': '请输入您的电子邮件',
+  'Pick a password of at least 6 characters': '请设置至少6个字符的密码',
+
+  // customer-auth server messages
+  'Please wait {n}s before requesting another code': '请等待{n}秒后再获取新的验证码',
+  'Could not send the verification code right now. Please try again shortly.': '暂时无法发送验证码，请稍后再试。',
+  'Phone and code required': '请输入手机号码和验证码',
+  'No valid code — request a new one': '验证码已失效，请重新获取',
+  'Too many attempts — request a new code': '尝试次数过多，请重新获取验证码',
+  'Customer not found': '找不到此客户',
+  'Name required': '请输入姓名',
+  'Pick one of the listed options for race': '请从列表中选择种族',
+  'Please select your race': '请选择您的种族',
+  'Please enter your email': '请输入您的电子邮件',
+  'This account cannot make bookings.': '此账户无法预约。',
+  'This account cannot make bookings. Please contact us for assistance.': '此账户无法预约。如需协助，请联系我们。',
+  'Failed to create account': '创建账户失败',
+  'Update failed': '更新失败',
+  'Password login is disabled for this site': '此网站未开放密码登录',
+  'Phone and password required': '请输入手机号码和密码',
+  'No account with that phone — sign up first': '此手机号码尚未注册，请先注册',
+  "This account doesn't have a password set yet. Tap below to set one up.": '此账户尚未设置密码，请点击下方进行设置。',
+  'Wrong password': '密码错误',
+  'That phone is already registered — sign in instead': '此手机号码已注册，请直接登录',
+  'Phone and name required': '请输入手机号码和姓名',
+  'Unknown tenant for host': '找不到此网址对应的商家',
+}

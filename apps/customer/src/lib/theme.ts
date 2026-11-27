@@ -7,6 +7,19 @@ import { tenant } from '@/config/tenant';
 /** Tenant's website accent (gold for Chiam's); falls back to the brand colour. */
 export const accent = tenant.accent ?? tenant.primaryColor;
 
+function rgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  const f = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  return [parseInt(f.slice(0, 2), 16), parseInt(f.slice(2, 4), 16), parseInt(f.slice(4, 6), 16)];
+}
+export const rgba = (hex: string, a: number) => `rgba(${rgb(hex).join(',')},${a})`;
+const darken = (hex: string, k: number) => `rgb(${rgb(hex).map(v => Math.round(v * k)).join(',')})`;
+
+/** Web --acct-accent-soft / -deep / -tint. */
+export const accentSoft = rgba(accent, 0.14);
+export const accentDeep = darken(accent, 0.6);
+export const accentTint = rgba(accent, 0.05);
+
 /** Tailwind gray scale as used across the web account pages. */
 export const gray = {
   50: '#f9fafb', 100: '#f3f4f6', 200: '#e5e7eb', 300: '#d1d5db', 400: '#9ca3af',
@@ -15,7 +28,7 @@ export const gray = {
 
 /** Booking flow palette (web --bf-*). */
 export const bf = {
-  ground: '#f7f5f0', paper: '#ffffff', raised: '#fbfaf5', ink: '#14140f', muted: '#75726a', muted2: '#a8a499',
+  ground: '#f7f5f0', paper: '#ffffff', raised: '#fbfaf5', ink: '#14140f', muted: '#75726a', muted2: '#a29e93', ink2: '#262620', ink3: '#4a4842',
   line: '#e6e2d6', hover: '#f2efe4', good: '#086048', goodSoft: 'rgba(8,96,72,0.08)', danger: '#a4381f', dangerSoft: 'rgba(164,56,31,0.08)',
 };
 

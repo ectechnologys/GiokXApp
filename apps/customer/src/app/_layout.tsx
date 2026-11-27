@@ -47,6 +47,8 @@ function Routes() {
     <Stack screenOptions={{ headerShown: false, headerTintColor: accent, headerTitleStyle: { color: '#111827', fontWeight: '700' }, headerShadowVisible: false }}>
       <Stack.Protected guard={!!session}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="book" />
+        <Stack.Screen name="support" />
         <Stack.Screen name="booking/[id]/index" options={{ headerShown: true, title: 'Booking' }} />
         <Stack.Screen name="booking/[id]/chat" options={{ headerShown: true, title: 'Chat' }} />
         <Stack.Screen name="booking/[id]/invoice" options={{ headerShown: true, title: 'Invoice' }} />

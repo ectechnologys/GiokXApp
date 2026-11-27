@@ -8,11 +8,30 @@ import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { tenant } from '@/config/tenant';
 import { fmtDate } from '@/lib/format';
 import { formatPhone } from '@/lib/phone';
-import { accent, badgeColors, gray, heroColors } from '@/lib/theme';
+import { accent, accentSoft, badgeColors, bf, gray, heroColors } from '@/lib/theme';
 
 /** bg-white rounded-2xl shadow-sm ring-1 ring-gray-100 p-5 */
 export function WCard({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
   return <View style={[styles.card, style]}>{children}</View>;
+}
+
+/** Web account card: bg-white rounded-2xl shadow-sm ring-1 ring-gray-100 p-5. */
+export function PageCard({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  return <View style={[styles.page, style]}>{children}</View>;
+}
+
+/** Web account-info Card: paper, --bf-line border, 14 radius, icon tile + title. */
+export function InfoCard({ title, icon, right, children }: { title: string; icon: ReactNode; right?: ReactNode; children: ReactNode }) {
+  return (
+    <View style={styles.info}>
+      <View style={styles.infoHead}>
+        <View style={styles.tile}>{icon}</View>
+        <Text style={styles.infoTitle}>{title}</Text>
+        {right}
+      </View>
+      {children}
+    </View>
+  );
 }
 
 /** text-[11px] font-bold uppercase tracking-wider text-gray-400 */
@@ -25,8 +44,8 @@ export function SectionLabel({ children, style }: { children: string; style?: St
 }
 
 /** text-[10px] font-bold uppercase tracking-wider rounded-full px-1.5 py-0.5 ring-1 */
-export function Badge({ label }: { label: string }) {
-  const c = badgeColors(label);
+export function Badge({ label, tone }: { label: string; tone?: string }) {
+  const c = badgeColors(tone ?? label);
   return (
     <View style={[styles.badge, { backgroundColor: c.bg, borderColor: c.ring }]}>
       <Text style={[styles.badgeText, { color: c.text }]}>{label.toUpperCase()}</Text>
@@ -89,6 +108,14 @@ export function Hero({ name, phone, member, right }: {
 }
 
 const styles = StyleSheet.create({
+  page: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: gray[100],
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 1,
+  },
+  info: { backgroundColor: '#fff', borderWidth: 1, borderColor: bf.line, borderRadius: 14, padding: 20, gap: 14 },
+  infoHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  tile: { width: 28, height: 28, borderRadius: 7, backgroundColor: accentSoft, alignItems: 'center', justifyContent: 'center' },
+  infoTitle: { fontSize: 14.5, fontWeight: '600', color: bf.ink, letterSpacing: -0.1 },
   card: {
     backgroundColor: '#fff', borderRadius: 16, padding: 18, gap: 8, borderWidth: 1, borderColor: gray[100],
     shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1,

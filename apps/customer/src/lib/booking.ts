@@ -120,7 +120,11 @@ export interface CoinTxn {
 
 /** Points balance + last 3 months of transactions. */
 export const getCoins = (token: string) =>
-  callFunction<{ ok: true; enabled: boolean; balance: number; points_name: string; expires: string | null; transactions: CoinTxn[] }>(
+  callFunction<{
+    ok: true; enabled: boolean; balance: number; points_name: string; expires: string | null; transactions: CoinTxn[];
+    reload?: import('@/lib/extras').ReloadConfig | null;
+    membership?: { enabled?: boolean; reminder_days?: number } | null;
+  }>(
     'customer-auth', { action: 'get-coins' }, token,
   );
 

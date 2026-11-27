@@ -3,6 +3,7 @@
 import { QueryClient, useQuery } from '@tanstack/react-query';
 
 import { ApiError, getBookings, getProfile } from '@/lib/api';
+import { getCoins } from '@/lib/booking';
 import { useSession } from '@/lib/session';
 
 export const queryClient = new QueryClient({
@@ -35,3 +36,4 @@ function useAuthed<T>(key: string, fn: (token: string) => Promise<T>) {
 
 export const useBookings = () => useAuthed('bookings', t => getBookings(t).then(r => r.bookings ?? []));
 export const useProfile = () => useAuthed('profile', getProfile);
+export const useCoins = () => useAuthed('coins', getCoins);

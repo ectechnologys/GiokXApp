@@ -1,23 +1,66 @@
-import { NativeTabs } from 'expo-router/native-tabs';
+// The web portal's bottom bar: Booking · Appt. · Chat · Credits · Account.
+// Icon over label; the current one is accent + bold with a short bar on top.
+// Booking opens the booking page (like the web, where it is a link out).
+import { Tabs, router } from 'expo-router';
+import { CalendarDays, CalendarPlus, Coins, MessageCircle, User } from 'lucide-react-native';
+import type { ReactNode } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useT } from '@/lib/i18n';
+import { useCoins } from '@/lib/queries';
+import { useDisplaySettings } from '@/lib/settings';
 import { accent, gray } from '@/lib/theme';
 
-export default function TabsLayout() {
+function Item({ label, icon, active, onPress }: { label: string; icon: (c: string) => ReactNode; active?: boolean; onPress: () => void }) {
+  const color = active ? accent : gray[700];
   return (
-    <NativeTabs backgroundColor="#ffffff" indicatorColor="rgba(195,164,111,0.18)" iconColor={{ default: gray[400], selected: accent }}
-      labelStyle={{ default: { color: gray[500] }, selected: { color: accent } }}>
-      <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Bookings</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon md="event_note" sf="calendar" />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="book">
-        <NativeTabs.Trigger.Label>Book</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon md="add_circle" sf="plus.circle" />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="account">
-        <NativeTabs.Trigger.Label>Account</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon md="person" sf="person.crop.circle" />
-      </NativeTabs.Trigger>
-    </NativeTabs>
+    <Pressable onPress={onPress} style={styles.item} accessibilityRole="tab" accessibilityState={{ selected: !!active }}>
+      {active && <View style={styles.mark} />}
+      {icon(color)}
+      <Text style={[styles.label, { color, fontWeight: active ? '700' : '500' }]}>{label}</Text>
+    </Pressable>
   );
 }
+
+export const unstable_settings = { initialRouteName: 'index' };
+
+export default function TabsLayout() {
+  const { t } = useT();
+  const insets = useSafeAreaInsets();
+  const coins = useCoins().data;
+  const coinsOn = coins?.enabled === true;
+  const chatOn = useDisplaySettings().data?.chatEnabled !== false;
+  const pointsName = coins?.points_name ?? '';
+  const pointsShort = pointsName.split(' ').filter(Boolean).slice(-1)[0] || pointsName;
+
+  return (
+    <Tabs
+      screenOptions={{ headerShown: false }}
+      tabBar={({ state, navigateToTab }) => {
+        const current = state.routes[state.index]?.name;
+        const go = (name: string) => { const r = state.routes.find(x => x.name === name); if (r) navigateToTab(r.key); };
+        return (
+          <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+            <Item label={t('Booking')} icon={c => <CalendarPlus size={20} color={c} strokeWidth={2} />} onPress={() => router.push('/book')} />
+            <Item label={t('Appt.')} icon={c => <CalendarDays size={20} color={c} strokeWidth={2} />} active={current === 'index'} onPress={() => go('index')} />
+            {chatOn && <Item label={t('Chat')} icon={c => <MessageCircle size={20} color={c} strokeWidth={2} />} active={current === 'chats'} onPress={() => go('chats')} />}
+            {coinsOn && <Item label={pointsShort} icon={c => <Coins size={20} color={c} strokeWidth={2} />} active={current === 'credits'} onPress={() => go('credits')} />}
+            <Item label={t('Account')} icon={c => <User size={20} color={c} strokeWidth={2} />} active={current === 'account'} onPress={() => go('account')} />
+          </View>
+        );
+      }}>
+      <Tabs.Screen name="index" />
+      <Tabs.Screen name="chats" />
+      <Tabs.Screen name="credits" />
+      <Tabs.Screen name="account" />
+    </Tabs>
+  );
+}
+
+const styles = StyleSheet.create({
+  bar: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.97)', borderTopWidth: 1, borderTopColor: gray[200], paddingTop: 10, paddingHorizontal: 12, gap: 4 },
+  item: { flex: 1, alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 6 },
+  mark: { position: 'absolute', top: -10, left: 12, right: 12, height: 3, borderBottomLeftRadius: 3, borderBottomRightRadius: 3, backgroundColor: accent },
+  label: { fontSize: 11 },
+});

@@ -5,10 +5,13 @@ import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useMemo, useState } from 'react';
-import { Image } from 'expo-image';
-import { ArrowLeft, ArrowRight, Check } from 'lucide-react-native';
+import { ArrowLeft, ArrowLeftRight, ArrowRight, Check, MessageCircle } from 'lucide-react-native';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { AppHeader } from '@/components/AppHeader';
+import { MonthCalendar } from '@/components/MonthCalendar';
+import { useT } from '@/lib/i18n';
 
 import { Field, Notice, PrimaryButton } from '@/components/ui';
 import { tenant } from '@/config/tenant';
@@ -27,11 +30,16 @@ import { applyPeak, peakLabel, peakServiceMember, resolvePeak } from '@/shared/p
 import { computeSpecialDiscount, specialDiscountFor } from '@/shared/specialDiscount';
 import { computeTax } from '@/shared/tax';
 
-type Step = 'service' | 'time' | 'address' | 'confirm' | 'paying' | 'done';
-const STEPS: Step[] = ['service', 'time', 'address', 'confirm'];
+type Step = 'date' | 'service' | 'time' | 'address' | 'confirm' | 'paying' | 'done';
+type OrderMode = 'date-first' | 'service-first';
+const ORDER: Record<OrderMode, Step[]> = {
+  'date-first': ['date', 'service', 'address', 'confirm'],
+  'service-first': ['service', 'time', 'address', 'confirm'],
+};
 const STEP_TITLE: Record<Step, [string, string]> = {
+  date: ['When would you like it?', 'Pick a date, then a time slot.'],
   service: ['What do you need?', 'Pick a service, then any extras.'],
-  time: ['When would you like it?', 'Pick a date, then a time slot.'],
+  time: ['When works for you?', 'Pick a date, then a time slot.'],
   address: ['Where should we come?', 'Choose a saved address or add a new one.'],
   confirm: ['Review & confirm', 'Check the details, then confirm.'],
   paying: ['Payment', 'Finish paying in the browser.'],
@@ -59,7 +67,11 @@ export default function Book() {
   const cfg = cfgQ.data;
   const rules = useMemo(() => peakQ.data ?? [], [peakQ.data]);
 
-  const [step, setStep] = useState<Step>('service');
+  const { t } = useT();
+  const insets = useSafeAreaInsets();
+  const [order, setOrder] = useState<OrderMode>('date-first');
+  const STEPS = ORDER[order];
+  const [step, setStep] = useState<Step>('date');
   const [service, setService] = useState<ServiceRow | null>(null);
   const [addonIds, setAddonIds] = useState<string[]>([]); // pick order matters
   const [date, setDate] = useState<string | null>(null);
@@ -100,7 +112,7 @@ export default function Book() {
   const slotsQ = useQuery({
     queryKey: ['slots', date, session?.customer.id],
     queryFn: () => getSlots(date!, token),
-    enabled: !!date && step === 'time',
+    enabled: !!date && (step === 'time' || step === 'service'),
     refetchInterval: 10_000,
   });
   const keys = useMemo(() => (service ? serviceSlotKeys(service) : new Set<string>()), [service]);
@@ -163,14 +175,21 @@ export default function Book() {
 
   // ── Navigation ───────────────────────────────────────────────────────────
   const reset = () => {
-    setStep('service'); setService(null); setAddonIds([]); setDate(null); setTime(null); setMaidId(null);
+    setStep(ORDER[order][0]); setService(null); setAddonIds([]); setDate(null); setTime(null); setMaidId(null);
     setNotes(''); setUsePoints(false); setErr(null); setHold(null); setDone(null);
   };
   const back = () => {
     setErr(null);
     const i = STEPS.indexOf(step);
     if (i > 0) setStep(STEPS[i - 1]);
+    else router.back();
   };
+  const swapOrder = () => {
+    const o: OrderMode = order === 'date-first' ? 'service-first' : 'date-first';
+    setOrder(o); setStep(ORDER[o][0]); setErr(null);
+  };
+  const end = dates.length ? dates[dates.length - 1] : today;
+  const minDate = dates[0] ?? today;
   const next = () => {
     setErr(null);
     const i = STEPS.indexOf(step);
@@ -204,8 +223,9 @@ export default function Book() {
 
   const onError = (e: unknown) => {
     const code = e instanceof ApiError ? e.code : '';
-    if (code === 'slot_unavailable') { setTime(null); setStep('time'); slotsQ.refetch(); }
-    if (code === 'maid_unavailable') { setMaidId(null); setStep('time'); slotsQ.refetch(); }
+    const timeStep: Step = order === 'date-first' ? 'service' : 'time';
+    if (code === 'slot_unavailable') { setTime(null); setStep(timeStep); slotsQ.refetch(); }
+    if (code === 'maid_unavailable') { setMaidId(null); setStep(timeStep); slotsQ.refetch(); }
     setErr((e as Error).message);
   };
 
@@ -283,40 +303,58 @@ export default function Book() {
 
   const stepIdx = STEPS.indexOf(step);
   const canNext =
-    step === 'service' ? !!service :
+    step === 'date' ? !!date :
+    step === 'service' ? (order === 'date-first' ? !!service && !!time : !!service) :
     step === 'time' ? !!date && !!time :
     step === 'address' ? addressOk : false;
   const ready = !!service && !!date && !!time && addressOk;
   const payLabel = !cfg?.paymentEnabled || pointsCover ? 'Confirm booking' : `Pay ${money(Math.max(0, total - pointsApplied))}`;
 
   return (
-    <SafeAreaView edges={['top']} style={styles.root}>
-      {/* Header: wordmark + BOOK ONLINE (web bf header) */}
-      <View style={styles.topbar}>
-        <Image source={require('@/assets/tenant/wordmark.png')} style={styles.wordmark} contentFit="contain" />
-        <Text style={styles.kicker}>BOOK ONLINE</Text>
-      </View>
-      {/* Stepper: numbered dots, ink when done / current */}
-      {stepIdx >= 0 && (
-        <View style={styles.stepper}>
-          {STEPS.map((st, i) => {
-            const on = i <= stepIdx;
-            return (
-              <View key={st} style={styles.stepItem}>
-                <View style={[styles.dot, on ? styles.dotOn : null]}>
-                  {i < stepIdx ? <Check size={12} color="#fff" strokeWidth={3} /> : <Text style={[styles.dotText, on ? { color: '#fff' } : null]}>{i + 1}</Text>}
-                </View>
-                {i < STEPS.length - 1 && <View style={[styles.stepLine, i < stepIdx ? { backgroundColor: bf.ink } : null]} />}
+    <View style={styles.root}>
+      <AppHeader kicker="Book online" points={coinsQ.data?.enabled ? balance : null} />
+      {/* Stepper (web bf-stepper): 1 ⇆ 2 — 3 — 4 — 5; ⇆ swaps date-first / service-first */}
+      <View style={styles.stepper}>
+        {[0, 1, 2, 3, 4].map(i => {
+          const cur = step === 'done' ? 4 : step === 'paying' ? 3 : stepIdx;
+          const on = i === cur;
+          const past = i < cur;
+          return (
+            <View key={i} style={[styles.stepItem, i === 4 && { flex: 0 }]}>
+              <View style={[styles.dot, on ? styles.dotOn : null, past ? styles.dotPast : null]}>
+                {past ? <Check size={12} color={bf.ink} strokeWidth={3} /> : <Text style={[styles.dotText, on ? { color: '#fff' } : null]}>{i + 1}</Text>}
               </View>
-            );
-          })}
-        </View>
-      )}
+              {i === 0 && stepIdx >= 0 && stepIdx <= 1 && (
+                <>
+                  <View style={[styles.stepLine, { flex: 0, width: 10 }]} />
+                  <Pressable onPress={swapOrder} style={styles.swap} hitSlop={6} accessibilityLabel={t('Swap order')}>
+                    <ArrowLeftRight size={12} color={bf.muted} strokeWidth={2.5} />
+                  </Pressable>
+                </>
+              )}
+              {i < 4 && <View style={styles.stepLine} />}
+            </View>
+          );
+        })}
+      </View>
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.panel}>
-          <Text style={styles.h1}>{STEP_TITLE[step][0]}</Text>
-          <Text style={styles.sub}>{STEP_TITLE[step][1]}</Text>
+          <Text style={styles.h1}>{t(STEP_TITLE[step][0])}</Text>
+          <Text style={styles.sub}>{t(STEP_TITLE[step][1])}</Text>
+
+          {(step === 'date' || step === 'time') && (
+            <MonthCalendar value={date} today={today} minDate={minDate} maxDate={end} holidays={holidays}
+              allowHoliday={!!cfg?.allowHolidayBooking} token={token}
+              slotMatches={step === 'date' || !service ? () => true : x => keys.has(slotKey(x))}
+              onPick={d => {
+                if (d !== date) { setTime(null); setMaidId(null); if (step === 'date') { setService(null); setAddonIds([]); } }
+                setDate(d);
+              }} />
+          )}
+          {step === 'date' && dates.length === 0 && (
+            <Notice tone="warn">{cfg?.bookingFrom ? `Online booking opens for dates from ${fmtDate(cfg.bookingFrom)}.` : 'No dates are open for booking right now.'}</Notice>
+          )}
 
           {step === 'service' && (
             <>
@@ -364,30 +402,11 @@ export default function Book() {
             </>
           )}
 
-          {step === 'time' && service && (
+          {((step === 'time' && service) || (step === 'service' && order === 'date-first' && service)) && (
             <>
-              {dates.length === 0 && (
-                <Notice tone="warn">{cfg?.bookingFrom ? `Online booking opens for dates from ${fmtDate(cfg.bookingFrom)}.` : 'No dates are open for booking right now.'}</Notice>
-              )}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-                {dates.map(d => {
-                  const hol = holidays.get(d);
-                  const on = d === date;
-                  const dt = new Date(`${d}T00:00:00`);
-                  return (
-                    <Pressable key={d} disabled={!!hol} onPress={() => { setDate(d); setTime(null); setMaidId(null); }}
-                      style={[styles.day, on ? styles.dayOn : null, d === today && !on ? { borderColor: accent } : null, hol ? { opacity: 0.4 } : null]}>
-                      <Text style={[styles.dayWk, on ? { color: 'rgba(255,255,255,0.7)' } : null]}>{dt.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase()}</Text>
-                      <Text style={[styles.dayNum, on ? { color: '#fff' } : null]}>{dt.getDate()}</Text>
-                      <Text style={[styles.dayWk, on ? { color: 'rgba(255,255,255,0.7)' } : null]}>{dt.toLocaleDateString('en-GB', { month: 'short' })}</Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-
               {date && (
                 <>
-                  <Text style={styles.section}>{fmtDate(date).toUpperCase()}</Text>
+                  <Text style={styles.section}>{`${t('Times')} · ${fmtDate(date)}`.toUpperCase()}</Text>
                   {slotsQ.isPending ? <ActivityIndicator color={bf.ink} /> : (
                     <View style={styles.times}>
                       {serviceTimes(service).map(t => {
@@ -547,11 +566,14 @@ export default function Book() {
       </ScrollView>
 
       {/* Bottom bar: Back · Continue (ink) / Pay (accent) — web bf-foot */}
+      <Pressable onPress={() => router.push('/support')} style={[styles.fab, { bottom: (stepIdx >= 0 ? 84 : 24) + insets.bottom }]} accessibilityLabel={t('Chat')}>
+        <MessageCircle size={26} color="#fff" strokeWidth={2} />
+      </Pressable>
       {stepIdx >= 0 && (
-        <View style={styles.foot}>
-          <Pressable onPress={back} disabled={stepIdx === 0} style={[styles.back, stepIdx === 0 ? { opacity: 0.3 } : null]} hitSlop={8}>
+        <View style={[styles.foot, { paddingBottom: 12 + insets.bottom }]}>
+          <Pressable onPress={back} style={styles.back} hitSlop={8}>
             <ArrowLeft size={16} color={bf.muted} />
-            <Text style={styles.backText}>Back</Text>
+            <Text style={styles.backText}>{t('Back')}</Text>
           </Pressable>
           {step === 'confirm' ? (
             <Pressable onPress={submit} disabled={busy} style={[styles.cont, styles.contAccent, busy ? { opacity: 0.5 } : null]}>
@@ -559,13 +581,13 @@ export default function Book() {
             </Pressable>
           ) : (
             <Pressable onPress={next} disabled={!canNext} style={[styles.cont, !canNext ? { opacity: 0.4 } : null]}>
-              <Text style={styles.contText}>Continue</Text>
+              <Text style={styles.contText}>{t('Continue')}</Text>
               <ArrowRight size={16} color="#fff" />
             </Pressable>
           )}
         </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -597,7 +619,13 @@ const styles = StyleSheet.create({
   topbar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: bf.line, backgroundColor: bf.paper },
   wordmark: { width: 110, height: 34 },
   kicker: { fontSize: 10, fontWeight: '700', letterSpacing: 2.4, color: bf.muted, marginBottom: 4 },
-  stepper: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
+  stepper: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
+  dotPast: { backgroundColor: bf.paper, borderColor: bf.ink },
+  swap: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: bf.line, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  fab: {
+    position: 'absolute', right: 20, width: 60, height: 60, borderRadius: 30, backgroundColor: accent, alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 6,
+  },
   stepItem: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   dot: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: bf.line, backgroundColor: bf.paper, alignItems: 'center', justifyContent: 'center' },
   dotOn: { backgroundColor: bf.ink, borderColor: bf.ink },
