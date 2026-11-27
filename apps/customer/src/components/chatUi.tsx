@@ -30,11 +30,16 @@ export function initials(name: string) {
 
 export function ChatAvatar({ id, name, channel, size = 44 }: { id: string; name: string; channel: 'web' | 'booking'; size?: number }) {
   const [bg, fg] = AV[slot(id)];
-  const badge = channel === 'booking' ? { el: <CalendarDays size={12} color="#fff" strokeWidth={2.4} />, color: accent } : { el: <Globe size={12} color="#fff" strokeWidth={2.4} />, color: '#d97706' };
+  // Web WsAvatar: a white disc at the bottom right with the channel icon in
+  // its colour (calendar in the accent for a booking, globe in amber for an
+  // enquiry).
+  const badge = channel === 'booking'
+    ? <CalendarDays size={12} color={accent} strokeWidth={2.4} />
+    : <Globe size={12} color="#d97706" strokeWidth={2.4} />;
   return (
     <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }}>
       <Text style={{ color: fg, fontSize: size * 0.34, fontWeight: '600' }}>{initials(name)}</Text>
-      <View style={[styles.badge, { backgroundColor: badge.color }]}>{badge.el}</View>
+      <View style={styles.badge}>{badge}</View>
     </View>
   );
 }
@@ -52,5 +57,5 @@ export function whenLabel(iso: string, timeFormat: '12h' | '24h' = '12h') {
 }
 
 const styles = StyleSheet.create({
-  badge: { position: 'absolute', right: -2, bottom: -2, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
+  badge: { position: 'absolute', right: -2, bottom: -2, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
 });

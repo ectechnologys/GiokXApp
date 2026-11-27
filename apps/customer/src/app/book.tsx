@@ -1,50 +1,46 @@
-// New booking: Service (+ add-ons) → Date & time (+ cleaner) → Address →
-// Confirm (price, points) → payment / done. Same rules and the same edge
-// functions as the web booking flow; the server re-checks everything.
+// New booking — the web BookingFlowPage wizard on a phone:
+//   date-first:    1 Date → 2 Service & time → 3 Your details → 4 Confirm → 5 Done
+//   service-first: 1 Service → 2 Date & time → 3 Your details → 4 Confirm → 5 Done
+// (⇆ on the stepper swaps the order). Same rules and the same edge functions
+// as the web; the server re-checks everything. Presentation lives in
+// src/components/bookflow/.
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { ArrowLeft, ArrowRight, Check, CreditCard, MessageCircle } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowLeftRight, ArrowRight, Check, MessageCircle } from 'lucide-react-native';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader } from '@/components/AppHeader';
+import { AddonsPalette, AddonSkipConfirm, type PricedAddon } from '@/components/bookflow/AddonSheets';
+import { formatBookingId, line2, redeemCap, redeemClamp, StepHead, Stepper } from '@/components/bookflow/atoms';
+import { DetailsStep, type AddrDraft } from '@/components/bookflow/DetailsStep';
+import { ClosedStep, ServiceStep, SuspendedNote, TimesPanel, type ServiceCard, type TimeRow } from '@/components/bookflow/pickers';
+import { ConfirmStep, PayingStep, PaymentFailedStep, SuccessStep } from '@/components/bookflow/ResultSteps';
+import { SummaryCard } from '@/components/bookflow/SummaryCard';
 import { MonthCalendar } from '@/components/MonthCalendar';
-import { useT } from '@/lib/i18n';
-
-import { Field, Notice, PrimaryButton } from '@/components/ui';
+import { Notice, PrimaryButton } from '@/components/ui';
 import { tenant } from '@/config/tenant';
 import { ApiError } from '@/lib/api';
 import {
-  createBooking, durationLabel, getAddons, getBookingConfig, getCoins, getHolidays, getPeakRules, getServices, getSlots,
-  memberOn, paymentStatus, priceAddons, redeemCap, serviceSlotKeys, serviceTimes, slotKey, slotMinutes, startPayment,
+  createBooking, getAddons, getBookingConfig, getCoins, getHolidays, getPeakRules, getServices, getSlots,
+  memberOn, paymentStatus, priceAddons, serviceSlotKeys, serviceTimes, slotKey, slotMinutes, startPayment,
   windowDays, type AddonRow, type BookingSuccess, type CreateBookingPayload, type ServiceRow,
 } from '@/lib/booking';
-import { fmtDate, fmtTime, money, todayIso } from '@/lib/format';
+import { fmtDate, todayIso } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { queryClient, useProfile } from '@/lib/queries';
 import { useSession } from '@/lib/session';
-import { useDisplaySettings } from '@/lib/settings';
+import { judgeCoverage, useDisplaySettings } from '@/lib/settings';
 import { accent, bf } from '@/lib/theme';
-import { applyPeak, peakLabel, peakServiceMember, resolvePeak } from '@/shared/peakPricing';
+import { applyPeak, peakServiceMember, resolvePeak } from '@/shared/peakPricing';
 import { computeSpecialDiscount, specialDiscountFor } from '@/shared/specialDiscount';
 import { computeTax } from '@/shared/tax';
 
-type Step = 'date' | 'service' | 'time' | 'address' | 'confirm' | 'paying' | 'done';
+type Step = 1 | 2 | 3 | 4 | 5;
 type OrderMode = 'date-first' | 'service-first';
-const ORDER: Record<OrderMode, Step[]> = {
-  'date-first': ['date', 'service', 'address', 'confirm'],
-  'service-first': ['service', 'time', 'address', 'confirm'],
-};
-const STEP_TITLE: Record<Step, [string, string]> = {
-  date: ['When would you like it?', 'Pick a date, then a time slot.'],
-  service: ['What do you need?', 'Pick a service, then any extras.'],
-  time: ['When works for you?', 'Pick a date, then a time slot.'],
-  address: ['Where should we come?', 'Choose a saved address or add a new one.'],
-  confirm: ['Review & confirm', 'Check the details, then confirm.'],
-  paying: ['Payment', 'Finish paying in the browser.'],
-  done: ['You’re booked', 'We’ve sent the details to you.'],
-};
+type Failed = { tone: 'red' | 'amber' | 'gray'; headline: string; subtext: string };
 
 const addDays = (iso: string, n: number) => {
   const d = new Date(`${iso}T00:00:00`);
@@ -52,13 +48,15 @@ const addDays = (iso: string, n: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 const hourOf = (t: string) => parseInt(t.slice(0, 2), 10);
+const EMPTY_ADDR: AddrDraft = { unit: '', address: '', postcode: '', city: '', lobby: '' };
 
 export default function Book() {
   const { session } = useSession();
   const token = session?.token;
   const profile = useProfile();
   const cust = profile.data?.customer;
-  const timeFormat = useDisplaySettings().data?.timeFormat ?? '12h';
+  const display = useDisplaySettings().data;
+  const timeFormat = display?.timeFormat ?? '12h';
 
   const cfgQ = useQuery({ queryKey: ['booking-config'], queryFn: getBookingConfig, staleTime: 60_000 });
   const svcQ = useQuery({ queryKey: ['services'], queryFn: getServices, staleTime: 5 * 60_000 });
@@ -70,25 +68,33 @@ export default function Book() {
   const { t } = useT();
   const insets = useSafeAreaInsets();
   const [order, setOrder] = useState<OrderMode>('date-first');
-  const STEPS = ORDER[order];
-  const [step, setStep] = useState<Step>('date');
+  const [step, setStep] = useState<Step>(1);
   const [service, setService] = useState<ServiceRow | null>(null);
   const [addonIds, setAddonIds] = useState<string[]>([]); // pick order matters
   const [date, setDate] = useState<string | null>(null);
   const [pickedTime, setTime] = useState<string | null>(null);
   const [pickedMaid, setMaidId] = useState<string | null>(null);
-  const [pickedAddr, setAddrIdx] = useState<number | 'new'>(0);
-  const [addr, setAddr] = useState({ unit: '', address: '', postcode: '', city: '', lobby: '' });
+  const [pickedAddr, setPickedAddr] = useState<string | null>(null);
+  const [draft, setDraft] = useState<AddrDraft>(EMPTY_ADDR);
   const [notes, setNotes] = useState('');
   const [usePoints, setUsePoints] = useState(false);
+  const [pointsAmount, setPointsAmount] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [hold, setHold] = useState<string | null>(null);
-  const [done, setDone] = useState<BookingSuccess | null>(null);
+  const [paying, setPaying] = useState(false);
+  const [failed, setFailed] = useState<Failed | null>(null);
+  const [done, setDone] = useState<(BookingSuccess & { booking_ref?: string }) | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [skipOpen, setSkipOpen] = useState(false);
 
   const addonsQ = useQuery({ queryKey: ['addons', service?.id], queryFn: () => getAddons(service!.id), enabled: !!service });
-  const addons = addonsQ.data ?? [];
-  const pickedAddons = addonIds.map(id => addons.find(a => a.id === id)).filter(Boolean) as AddonRow[];
+  const addons = useMemo(() => addonsQ.data ?? [], [addonsQ.data]);
+  const pickedAddons = useMemo(
+    () => addonIds.map(id => addons.find(a => a.id === id)).filter(Boolean) as AddonRow[],
+    [addonIds, addons],
+  );
+  const toggleAddon = (id: string) => setAddonIds(ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]));
 
   // ── Dates ───────────────────────────────────────────────────────────────
   const today = todayIso();
@@ -112,7 +118,7 @@ export default function Book() {
   const slotsQ = useQuery({
     queryKey: ['slots', date, session?.customer.id],
     queryFn: () => getSlots(date!, token),
-    enabled: !!date && (step === 'time' || step === 'service'),
+    enabled: !!date && step === 2,
     refetchInterval: 10_000,
   });
   const keys = useMemo(() => (service ? serviceSlotKeys(service) : new Set<string>()), [service]);
@@ -135,66 +141,107 @@ export default function Book() {
   const maids = useMemo(() => (time ? byHour[hourOf(time)]?.maids ?? [] : []), [time, byHour]);
   const maidId = pickedMaid && maids.some(m => m.id === pickedMaid) ? pickedMaid : null;
 
+  // Date-first step 2: services with nothing free on the picked date are greyed.
+  const disabledServiceIds = useMemo(() => {
+    const s = new Set<string>();
+    if (!slotsQ.data?.slots || !date) return s;
+    const now = new Date();
+    for (const svc of svcQ.data ?? []) {
+      const k = serviceSlotKeys(svc);
+      const any = slotsQ.data.slots.some(x => k.has(slotKey(x)) && x.status === 'available' && !(date === today && x.start_hour <= now.getHours()));
+      if (!any) s.add(svc.id);
+    }
+    return s;
+  }, [slotsQ.data, svcQ.data, date, today]);
+
   // ── Price (display only; payments-start charges the same way) ────────────
+  const mem = memberOn(cust, date || today);
   const price = useMemo(() => {
     if (!service || !cfg) return null;
     const dk = date ?? '';
-    const mem = memberOn(cust, dk || today);
     const em = peakServiceMember(dk, service.id, mem, rules);
     const slots = service.service_time_slots ?? [];
     const baseOf = (s: (typeof slots)[number]) => Number(em && Number(s.member_price) > 0 ? s.member_price : s.price ?? 0);
     const row = time ? slots.find(s => (s.available_time ?? '').slice(0, 5) === time.slice(0, 5)) ?? slots[0] : undefined;
     const fromList = slots.map(s => applyPeak(baseOf(s), dk, service.id, mem, rules)).filter(p => p > 0);
+    const from = fromList.length ? Math.min(...fromList) : null;
     const base = row ? baseOf(row) : 0;
     const peak = row ? resolvePeak(base, dk, service.id, mem, rules) : { add: 0, rule: null };
     const slotPrice = row ? applyPeak(base, dk, service.id, mem, rules) : null;
+    const basePrice = slotPrice ?? from ?? 0;
     const eff = priceAddons(pickedAddons, mem, cfg.memberSpecialAddonMode);
     const addonTotal = pickedAddons.reduce((s, a) => s + (eff.get(a.id) ?? 0), 0);
-    const sd = computeSpecialDiscount(specialDiscountFor(cfg.specialDiscount, cust), !!cust?.has_special_discount, {
-      servicePrice: slotPrice ?? 0, addonsTotal: addonTotal,
-    });
-    const preTax = Math.max(0, (slotPrice ?? 0) + addonTotal - sd);
+    const sdCfg = specialDiscountFor(cfg.specialDiscount, cust);
+    const sd = computeSpecialDiscount(sdCfg, !!cust?.has_special_discount, { servicePrice: basePrice, addonsTotal: addonTotal });
+    const preTax = Math.max(0, Math.round((basePrice + addonTotal - sd) * 100) / 100);
     const tax = computeTax(preTax, cfg.taxRate, cfg.taxMode, cfg.taxRoundUp);
     const perHour: Record<number, number> = {};
     for (const s of slots) perHour[hourOf(s.available_time ?? '')] = applyPeak(baseOf(s), dk, service.id, mem, rules);
-    return { mem, from: fromList.length ? Math.min(...fromList) : null, base, peak, slotPrice, eff, addonTotal, sd, tax, perHour };
-  }, [service, cfg, date, time, cust, rules, pickedAddons, today]);
+    return { from, base, peak, slotPrice, eff, addonTotal, sdCfg, sd, tax, perHour };
+  }, [service, cfg, date, time, cust, rules, pickedAddons, mem]);
 
+  // Add-ons as the sheets price them (web memberAddons: in 'single' mode only
+  // the first-picked member special keeps the member price).
+  const pricedAddons: PricedAddon[] = useMemo(() => {
+    const claimed = mem && cfg?.memberSpecialAddonMode === 'single' ? pickedAddons.find(a => a.is_member_special)?.id ?? null : null;
+    return addons.map(a => {
+      let p = a.is_member_special && mem ? Number(a.member_price ?? 0) : Number(a.price ?? 0);
+      if (claimed && a.is_member_special && a.id !== claimed) p = Number(a.price ?? 0);
+      return { ...a, shownPrice: p };
+    });
+  }, [addons, pickedAddons, mem, cfg?.memberSpecialAddonMode]);
+
+  // ── Points (web redeemCap / redeemClamp) ──────────────────────────────────
   const pointsOn = !!cfg?.paymentEnabled && !!cfg?.pointsRedemptionEnabled && !!coinsQ.data?.enabled;
   const balance = Math.max(0, Number(coinsQ.data?.balance ?? 0));
   const total = price?.tax.total ?? 0;
-  const pointsApplied = pointsOn && usePoints && balance > 0 ? redeemCap(balance, total, !!cfg?.pointsRedeemWhole) : 0;
+  const whole = !!cfg?.pointsRedeemWhole;
+  const maxRedeem = redeemCap(balance, total, whole);
+  const pointsApplied = pointsOn && usePoints && balance > 0 ? redeemClamp(pointsAmount ?? maxRedeem, maxRedeem, whole, total) : 0;
   const pointsCover = pointsApplied > 0 && total > 0 && pointsApplied >= total;
-  const pointsName = coinsQ.data?.points_name || cfg?.pointsName || 'points';
+  const pointsName = coinsQ.data?.points_name || cfg?.pointsName || 'Points';
 
   // ── Address ──────────────────────────────────────────────────────────────
-  const saved = profile.data?.addresses ?? [];
-  const addrIdx: number | 'new' = saved.length ? pickedAddr : 'new';
-  const chosen = addrIdx === 'new' ? null : saved[addrIdx];
-  const addressOk = chosen ? !!(chosen.unit_number || chosen.address) : !!addr.unit.trim() && !!addr.address.trim();
+  const saved = useMemo(() => profile.data?.addresses ?? [], [profile.data?.addresses]);
+  const addrId = saved.length
+    ? pickedAddr === '__new' || (pickedAddr && saved.some(a => a.id === pickedAddr)) ? pickedAddr : saved[0].id
+    : '__new';
+  const chosen = saved.find(a => a.id === addrId) ?? null;
+  const addr = chosen
+    ? { unit: chosen.unit_number ?? '', address: chosen.address ?? '', postcode: chosen.postcode ?? '', city: chosen.city ?? '', lobby: chosen.lobby_note ?? '' }
+    : draft;
+  const coverageCfg = display?.coverage;
+  const coverage = coverageCfg?.enforce_booking === true && chosen?.lat != null && chosen?.lng != null
+    ? judgeCoverage(coverageCfg, { lat: chosen.lat, lng: chosen.lng })
+    : null;
+  const coverageBlocked = coverage !== null && coverage.kind !== 'covered';
+  const addressOk = !!addr.unit.trim() && !!addr.address.trim() && !coverageBlocked;
 
   // ── Navigation ───────────────────────────────────────────────────────────
   const reset = () => {
-    setStep(ORDER[order][0]); setService(null); setAddonIds([]); setDate(null); setTime(null); setMaidId(null);
-    setNotes(''); setUsePoints(false); setErr(null); setHold(null); setDone(null);
+    setStep(1); setService(null); setAddonIds([]); setDate(null); setTime(null); setMaidId(null);
+    setNotes(''); setUsePoints(false); setPointsAmount(null); setErr(null); setHold(null); setDone(null);
+    setPaying(false); setFailed(null);
   };
   const back = () => {
     setErr(null);
-    const i = STEPS.indexOf(step);
-    if (i > 0) setStep(STEPS[i - 1]);
-    else router.back();
+    if (step === 1) { router.back(); return; }
+    const nextStep = (step - 1) as Step;
+    if (nextStep === 1 && order === 'service-first') { setDate(null); setTime(null); }
+    setStep(nextStep);
   };
   const swapOrder = () => {
-    const o: OrderMode = order === 'date-first' ? 'service-first' : 'date-first';
-    setOrder(o); setStep(ORDER[o][0]); setErr(null);
+    setOrder(o => (o === 'date-first' ? 'service-first' : 'date-first'));
+    setService(null); setAddonIds([]); setDate(null); setTime(null); setMaidId(null); setStep(1); setErr(null);
+  };
+  const advance = () => { setErr(null); setStep(s => Math.min(5, s + 1) as Step); };
+  const onContinue = () => {
+    const isServicePickStep = (order === 'service-first' && step === 1) || (order === 'date-first' && step === 2);
+    if (isServicePickStep && addons.length > 0 && pickedAddons.length === 0) { setSkipOpen(true); return; }
+    advance();
   };
   const end = dates.length ? dates[dates.length - 1] : today;
   const minDate = dates[0] ?? today;
-  const next = () => {
-    setErr(null);
-    const i = STEPS.indexOf(step);
-    setStep(STEPS[i + 1]);
-  };
 
   // ── Submit ───────────────────────────────────────────────────────────────
   const payload = (): CreateBookingPayload => ({
@@ -202,30 +249,31 @@ export default function Book() {
     appointment_date: date!,
     appointment_time: time!,
     duration_minutes: slotMinutes(service!, time),
-    selected_addon_ids: addonIds,
+    selected_addon_ids: pickedAddons.map(a => a.id),
     notes: notes.trim() || undefined,
-    house_unit: chosen ? chosen.unit_number : addr.unit.trim(),
-    address: chosen ? chosen.address : addr.address.trim(),
-    city: chosen ? chosen.city : addr.city.trim() || undefined,
-    postcode: chosen ? chosen.postcode : addr.postcode.trim() || undefined,
+    house_unit: addr.unit.trim(),
+    address: addr.address.trim(),
+    city: addr.city.trim() || undefined,
+    postcode: addr.postcode.trim() || undefined,
     address_lat: chosen?.lat ?? null,
     address_lng: chosen?.lng ?? null,
-    lobby_note: (chosen ? chosen.lobby_note : addr.lobby.trim()) || undefined,
+    lobby_note: addr.lobby.trim() || undefined,
     requested_maid_id: maidId,
   });
 
   const finish = (r: BookingSuccess) => {
     setDone(r);
-    setStep('done');
+    setPaying(false);
+    setHold(null);
+    setStep(5);
     queryClient.invalidateQueries({ queryKey: ['bookings'] });
     queryClient.invalidateQueries({ queryKey: ['coins'] });
   };
 
   const onError = (e: unknown) => {
     const code = e instanceof ApiError ? e.code : '';
-    const timeStep: Step = order === 'date-first' ? 'service' : 'time';
-    if (code === 'slot_unavailable') { setTime(null); setStep(timeStep); slotsQ.refetch(); }
-    if (code === 'maid_unavailable') { setMaidId(null); setStep(timeStep); slotsQ.refetch(); }
+    if (code === 'slot_unavailable') { setTime(null); setStep(2); slotsQ.refetch(); }
+    if (code === 'maid_unavailable') { setMaidId(null); setStep(2); slotsQ.refetch(); }
     setErr((e as Error).message);
   };
 
@@ -241,7 +289,7 @@ export default function Book() {
       if (r.paid_in_full) { finish(r); return; }
       if (!r.checkout_url || !r.hold_token) throw new Error('Payment could not be started. Please try again.');
       setHold(r.hold_token);
-      setStep('paying');
+      setPaying(true);
       await WebBrowser.openBrowserAsync(r.checkout_url);
     } catch (e) {
       onError(e);
@@ -250,22 +298,29 @@ export default function Book() {
     }
   };
 
+  const paymentFailed = (f: Failed) => { setFailed(f); setPaying(false); setHold(null); };
+
   // While paying: poll until HitPay confirms, or the hold is released.
   useEffect(() => {
-    if (step !== 'paying' || !hold || !token) return;
+    if (!paying || !hold || !token) return;
     let stop = false;
     const tick = async () => {
       try {
         const s = await paymentStatus(token, hold);
         if (stop) return;
         if (s.status === 'confirmed') finish(s);
-        else if (s.status === 'released' || s.status === 'expired') { setErr('The payment was not completed, so the booking was not made.'); setStep('confirm'); setHold(null); }
+        else if (s.status === 'released') {
+          paymentFailed({ tone: 'amber', headline: t("Payment didn't go through"), subtext: t('The payment window closed without completing. Try again — your booking details are still filled in.') });
+        } else if (s.status === 'expired') {
+          paymentFailed({ tone: 'amber', headline: t("Payment couldn't be verified"), subtext: t("We didn't hear back from the payment provider in time. Nothing was booked. Please try again — your booking details are still filled in.") });
+        }
       } catch { /* keep polling */ }
     };
     tick();
-    const t = setInterval(tick, 3000);
-    return () => { stop = true; clearInterval(t); };
-  }, [step, hold, token]);
+    const iv = setInterval(tick, 3000);
+    return () => { stop = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paying, hold, token]);
 
   const cancelPayment = async () => {
     if (!token || !hold) return;
@@ -273,7 +328,7 @@ export default function Book() {
     try {
       const s = await paymentStatus(token, hold, true); // server re-checks with HitPay first
       if (s.status === 'confirmed') finish(s);
-      else { setErr('Payment cancelled. Your booking was not made.'); setStep('confirm'); setHold(null); }
+      else paymentFailed({ tone: 'gray', headline: t('Payment cancelled'), subtext: t("No worries — nothing was charged. Your booking details are still filled in if you'd like to try again.") });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -294,299 +349,193 @@ export default function Book() {
       </Center>
     );
   }
-  if (cfg?.bookingsPaused) {
-    return <Center><Notice tone="warn">{`${tenant.name} isn’t taking new bookings right now. Please check back later.`}</Notice></Center>;
-  }
-  if (cust?.suspended) {
-    return <Center><Notice tone="error">This account can’t make bookings. Please contact us.</Notice></Center>;
-  }
 
-  const stepIdx = STEPS.indexOf(step);
-  const canNext =
-    step === 'date' ? !!date :
-    step === 'service' ? (order === 'date-first' ? !!service && !!time : !!service) :
-    step === 'time' ? !!date && !!time :
-    step === 'address' ? addressOk : false;
-  const ready = !!service && !!date && !!time && addressOk;
-  const payLabel = !cfg?.paymentEnabled || pointsCover ? 'Confirm booking' : `Pay ${money(Math.max(0, total - pointsApplied))}`;
+  const paused = !!cfg?.bookingsPaused;
+  const suspended = !!cust?.suspended;
+  const canContinue = (() => {
+    if (suspended) return false;
+    if (paused && (step === 1 || step === 2)) return false;
+    if (step === 1) return order === 'date-first' ? !!date : !!service;
+    if (step === 2) return order === 'date-first' ? !!service && !!time : !!date && !!time;
+    if (step === 3) return addressOk;
+    return true;
+  })();
+  const needsPay = !!cfg?.paymentEnabled && !pointsCover;
+
+  // Service cards — from-price follows the booking-date member gate + peak.
+  const cards: ServiceCard[] = (svcQ.data ?? []).map(svc => {
+    const dk = date ?? '';
+    const em = peakServiceMember(dk, svc.id, mem, rules);
+    const prices = (svc.service_time_slots ?? [])
+      .map(s => Number(em && s.member_price != null && Number(s.member_price) > 0 ? s.member_price : s.price ?? 0))
+      .filter(p => p > 0);
+    return {
+      svc,
+      from: prices.length ? applyPeak(Math.min(...prices), dk, svc.id, mem, rules) : null,
+      disabled: order === 'date-first' && step === 2 && disabledServiceIds.has(svc.id),
+    };
+  });
+  const pickService = (s: ServiceRow) => {
+    if (s.id === service?.id) return;
+    setService(s); setAddonIds([]); setTime(null); setMaidId(null);
+    if (order === 'service-first') setDate(null);
+  };
+
+  const timeRows: TimeRow[] = service ? serviceTimes(service).flatMap(tm => {
+    const h = hourOf(tm);
+    const st = byHour[h];
+    if (st?.status === 'hidden' && (st.reason.startsWith('Outside working hours') || st.reason.startsWith('Closed on this day'))) return [];
+    const past = date === today && h <= new Date().getHours();
+    const blocked = !slotsQ.data || past || !st || st.status === 'full' || st.status === 'hidden';
+    return [{ time: tm, price: price?.perHour[h] ?? null, blocked }];
+  }) : [];
+  const times = (
+    <TimesPanel date={date} rows={service ? timeRows : []} timeFormat={timeFormat} time={time} onTime={setTime}
+      maids={service ? maids : []} maidId={maidId} onMaid={setMaidId} emptyHint />
+  );
+  const calendar = (onPick: (d: string) => void, match: Parameters<typeof MonthCalendar>[0]['slotMatches']) => (
+    <MonthCalendar value={date} today={today} minDate={minDate} maxDate={end} holidays={holidays}
+      allowHoliday={!!cfg?.allowHolidayBooking} token={token} slotMatches={match} disabled={paused} onPick={onPick} />
+  );
+  const noDates = dates.length === 0 && (
+    <Notice tone="warn">{cfg?.bookingFrom ? `Online booking opens for dates from ${fmtDate(cfg.bookingFrom)}.` : 'No dates are open for booking right now.'}</Notice>
+  );
+
+  const stepView = (() => {
+    if (failed) {
+      return <PaymentFailedStep tenantName={tenant.name} {...failed}
+        onTryAgain={() => { setFailed(null); setErr(null); setStep(4); }}
+        onBack={() => { reset(); router.navigate('/'); }} />;
+    }
+    if (paying) return <PayingStep busy={busy} onCancel={cancelPayment} />;
+    if (step === 1 && paused) return <ClosedStep tenantName={tenant.name} />;
+    if (step === 1 && order === 'date-first') {
+      return (
+        <View>
+          <StepHead title={t('When would you like it?')} sub={t('Pick a date, then a time slot.')} />
+          {calendar(d => {
+            if (d !== date) { setTime(null); setMaidId(null); setService(null); setAddonIds([]); }
+            setDate(d);
+          }, () => true)}
+          {noDates}
+        </View>
+      );
+    }
+    if (step === 1) {
+      return <ServiceStep cards={cards} value={service?.id ?? null} onChange={pickService} isMember={mem}
+        addonCount={addons.length} pickedCount={pickedAddons.length} onOpenAddons={() => setPaletteOpen(true)} />;
+    }
+    if (step === 2 && order === 'date-first') {
+      return (
+        <View style={{ gap: 20 }}>
+          <ServiceStep cards={cards} value={service?.id ?? null} onChange={pickService} isMember={mem}
+            addonCount={addons.length} pickedCount={pickedAddons.length} onOpenAddons={() => setPaletteOpen(true)} />
+          {times}
+        </View>
+      );
+    }
+    if (step === 2) {
+      return (
+        <View>
+          <StepHead title={t('When works for you?')} sub={t('Pick a date, then a time slot.')} />
+          <View style={{ gap: 14 }}>
+            {calendar(d => { if (d !== date) { setTime(null); setMaidId(null); } setDate(d); }, x => keys.has(slotKey(x)))}
+            {noDates}
+            {times}
+          </View>
+        </View>
+      );
+    }
+    if (step === 3) {
+      return <DetailsStep firstName={(cust?.name ?? '').split(' ')[0]} saved={saved} addrId={addrId}
+        onPick={id => setPickedAddr(id)} onUseNew={() => { setPickedAddr('__new'); setDraft(EMPTY_ADDR); }}
+        draft={draft} setDraft={setDraft} chosen={chosen} coverage={coverage} notes={notes} setNotes={setNotes} />;
+    }
+    if (step === 4 && service && date && time && price) {
+      return <ConfirmStep tenantName={tenant.name} serviceName={service.name} slotPrice={price.slotPrice} isMember={mem}
+        date={date} time={time} timeFormat={timeFormat} addons={pickedAddons} addonTotal={price.addonTotal}
+        name={cust?.name ?? ''} phone={cust?.phone_e164 ?? ''}
+        addressLine={[addr.unit.trim(), addr.address.trim()].filter(Boolean).join(', ')}
+        addressSub={[addr.postcode.trim(), addr.city.trim()].filter(Boolean).join(' ')}
+        lobby={addr.lobby.trim()} notes={notes.trim()} />;
+    }
+    if (step === 5 && done) {
+      return <SuccessStep tenantName={tenant.name} bookingRef={formatBookingId(done.booking_id) || done.booking_ref || ''}
+        serviceName={done.service_name ?? service?.name ?? '—'} date={done.appointment_date ?? date ?? ''}
+        time={done.appointment_time ?? time ?? ''} timeFormat={timeFormat} addons={done.addons}
+        onBookAgain={reset} onViewBookings={() => { reset(); router.navigate('/'); }} />;
+    }
+    return null;
+  })();
+
+  const showFoot = step !== 5 && !paying && !failed;
 
   return (
     <View style={styles.root}>
       <AppHeader kicker="Book online" points={coinsQ.data?.enabled ? balance : null} />
-      {/* Stepper (web bf-stepper): 1 ⇆ 2 — 3 — 4 — 5; ⇆ swaps date-first / service-first */}
-      <View style={styles.stepper}>
-        {[0, 1, 2, 3, 4].map(i => {
-          const cur = step === 'done' ? 4 : step === 'paying' ? 3 : stepIdx;
-          const on = i === cur;
-          const past = i < cur;
-          return (
-            <View key={i} style={[styles.stepItem, i === 4 && { flex: 0 }]}>
-              <View style={[styles.dot, on ? styles.dotOn : null, past ? styles.dotPast : null]}>
-                {past ? <Check size={12} color={bf.ink} strokeWidth={3} /> : <Text style={[styles.dotText, on ? { color: '#fff' } : null]}>{i + 1}</Text>}
-              </View>
-              {i === 0 && stepIdx >= 0 && stepIdx <= 1 && (
-                <>
-                  <View style={[styles.stepLine, { flex: 0, width: 10 }]} />
-                  <Pressable onPress={swapOrder} style={styles.swap} hitSlop={6} accessibilityLabel={t('Swap order')}>
-                    <ArrowLeftRight size={12} color={bf.muted} strokeWidth={2.5} />
-                  </Pressable>
-                </>
-              )}
-              {i < 4 && <View style={styles.stepLine} />}
-            </View>
-          );
-        })}
-      </View>
+      <Stepper step={paying ? 4 : step} onSwap={swapOrder}
+        swapLabel={order === 'date-first' ? t('Switch to Service first') : t('Switch to Date first')} />
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <View style={styles.panel}>
-          <Text style={styles.h1}>{t(STEP_TITLE[step][0])}</Text>
-          <Text style={styles.sub}>{t(STEP_TITLE[step][1])}</Text>
-
-          {(step === 'date' || step === 'time') && (
-            <MonthCalendar value={date} today={today} minDate={minDate} maxDate={end} holidays={holidays}
-              allowHoliday={!!cfg?.allowHolidayBooking} token={token}
-              slotMatches={step === 'date' || !service ? () => true : x => keys.has(slotKey(x))}
-              onPick={d => {
-                if (d !== date) { setTime(null); setMaidId(null); if (step === 'date') { setService(null); setAddonIds([]); } }
-                setDate(d);
-              }} />
-          )}
-          {step === 'date' && dates.length === 0 && (
-            <Notice tone="warn">{cfg?.bookingFrom ? `Online booking opens for dates from ${fmtDate(cfg.bookingFrom)}.` : 'No dates are open for booking right now.'}</Notice>
-          )}
-
-          {step === 'service' && (
-            <>
-              {(svcQ.data ?? []).map(s => {
-                const on = service?.id === s.id;
-                const mem = memberOn(cust, today);
-                const from = (s.service_time_slots ?? [])
-                  .map(x => Number(mem && Number(x.member_price) > 0 ? x.member_price : x.price ?? 0))
-                  .filter(p => p > 0);
-                return (
-                  <Pressable key={s.id} onPress={() => { if (!on) { setService(s); setAddonIds([]); setTime(null); setMaidId(null); } }}
-                    style={[styles.svc, on ? styles.svcOn : null]}>
-                    <View style={[styles.radio, on ? styles.radioOn : null]}>{on && <View style={styles.radioDot} />}</View>
-                    <View style={{ flex: 1, gap: 3 }}>
-                      <Text style={styles.svcName}>{s.name}</Text>
-                      {s.description ? <Text style={styles.svcDesc} numberOfLines={3}>{s.description}</Text> : null}
-                      <Text style={styles.svcMeta}>{durationLabel(s)}{s.pax === 2 ? ' · 2 cleaners' : ''}</Text>
-                    </View>
-                    {from.length ? <Text style={styles.svcPrice}>{`From\n${money(Math.min(...from))}`}</Text> : null}
-                  </Pressable>
-                );
-              })}
-              {service && addons.length > 0 && (
-                <>
-                  <Text style={styles.section}>ADD EXTRAS</Text>
-                  {addons.map(a => {
-                    const on = addonIds.includes(a.id);
-                    const memberPrice = a.is_member_special && price?.mem;
-                    return (
-                      <Pressable key={a.id} onPress={() => setAddonIds(ids => (on ? ids.filter(x => x !== a.id) : [...ids, a.id]))}
-                        style={[styles.svc, on ? styles.svcOn : null]}>
-                        <View style={[styles.box, on ? styles.boxOn : null]}>{on && <Check size={12} color="#fff" strokeWidth={3} />}</View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.svcName}>{a.name}</Text>
-                          {a.description ? <Text style={styles.svcDesc} numberOfLines={2}>{a.description}</Text> : null}
-                        </View>
-                        <Text style={styles.addonPrice}>
-                          {on && price ? money(price.eff.get(a.id) ?? a.price) : memberPrice ? `${money(a.member_price ?? 0)}\nmember` : money(a.price)}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </>
-              )}
-            </>
-          )}
-
-          {((step === 'time' && service) || (step === 'service' && order === 'date-first' && service)) && (
-            <>
-              {date && (
-                <>
-                  <Text style={styles.section}>{`${t('Times')} · ${fmtDate(date)}`.toUpperCase()}</Text>
-                  {slotsQ.isPending ? <ActivityIndicator color={bf.ink} /> : (
-                    <View style={styles.times}>
-                      {serviceTimes(service).map(t => {
-                        const h = hourOf(t);
-                        const st = byHour[h];
-                        if (st?.status === 'hidden' && (st.reason.startsWith('Outside working hours') || st.reason.startsWith('Closed on this day'))) return null;
-                        const now = new Date();
-                        const past = date === today && h <= now.getHours();
-                        const blocked = past || !st || st.status === 'full' || st.status === 'hidden';
-                        const on = time === t && !blocked;
-                        const p = price?.perHour[h];
-                        return (
-                          <Pressable key={t} disabled={blocked} onPress={() => setTime(t)}
-                            style={[styles.time, on ? styles.timeOn : null, blocked ? styles.timeOff : null]}>
-                            <Text style={[styles.timeText, on ? { color: '#fff' } : null, blocked ? styles.strike : null]}>{fmtTime(t, timeFormat)}</Text>
-                            {p ? <Text style={[styles.timePrice, on ? { color: 'rgba(255,255,255,0.72)' } : null, blocked ? styles.strike : null]}>RM {p}</Text> : null}
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  )}
-                  {slotsQ.data && Object.values(byHour).every(s => s.status !== 'available') && (
-                    <Text style={styles.sub}>No free times on this day. Try another date.</Text>
-                  )}
-                </>
-              )}
-
-              {time && maids.length > 0 && (
-                <>
-                  <Text style={styles.section}>YOUR TEAM</Text>
-                  <View style={styles.pills}>
-                    {[{ id: null as string | null, label: 'Any available' }, ...maids].map(m => {
-                      const on = maidId === m.id;
-                      return (
-                        <Pressable key={m.id ?? 'any'} onPress={() => setMaidId(on && m.id ? null : m.id)} style={[styles.pill, on ? styles.pillOn : null]}>
-                          <Text style={[styles.pillText, on ? { color: '#fff' } : null]}>{m.label}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                  <Text style={styles.note}>
-                    Free to choose — we’ll hold them for this visit. Where a job takes two people, the one you pick is the one we promise.
-                  </Text>
-                </>
-              )}
-            </>
-          )}
-
-          {step === 'address' && (
-            <>
-              {saved.map((a, i) => {
-                const on = addrIdx === i;
-                return (
-                  <Pressable key={a.id} onPress={() => setAddrIdx(i)} style={[styles.svc, on ? styles.svcOn : null]}>
-                    <View style={[styles.radio, on ? styles.radioOn : null]}>{on && <View style={styles.radioDot} />}</View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.svcName}>{[a.unit_number, a.address].filter(Boolean).join(', ')}</Text>
-                      {(a.postcode || a.city) ? <Text style={styles.svcDesc}>{[a.postcode, a.city].filter(Boolean).join(' ')}</Text> : null}
-                    </View>
-                  </Pressable>
-                );
-              })}
-              {saved.length > 0 && (
-                <Pressable onPress={() => setAddrIdx('new')} style={[styles.svc, addrIdx === 'new' ? styles.svcOn : null]}>
-                  <View style={[styles.radio, addrIdx === 'new' ? styles.radioOn : null]}>{addrIdx === 'new' && <View style={styles.radioDot} />}</View>
-                  <Text style={styles.svcName}>Use a new address</Text>
-                </Pressable>
-              )}
-              {addrIdx === 'new' && (
-                <>
-                  <Field label="Unit / House No." required value={addr.unit} onChangeText={v => setAddr(a => ({ ...a, unit: v }))} placeholder="A-12-34 or 56" />
-                  <Field label="Address" required value={addr.address} onChangeText={v => setAddr(a => ({ ...a, address: v }))} placeholder="Street, area" multiline />
-                  <View style={{ flexDirection: 'row', gap: 12 }}>
-                    <View style={{ flex: 1 }}><Field label="Postcode" value={addr.postcode} keyboardType="number-pad" maxLength={6} onChangeText={v => setAddr(a => ({ ...a, postcode: v.replace(/\D/g, '') }))} /></View>
-                    <View style={{ flex: 1.4 }}><Field label="City" value={addr.city} onChangeText={v => setAddr(a => ({ ...a, city: v }))} /></View>
-                  </View>
-                  <Field label="Directions for our team (optional)" value={addr.lobby} onChangeText={v => setAddr(a => ({ ...a, lobby: v }))} />
-                </>
-              )}
-              <Field label="Notes for this booking (optional)" value={notes} onChangeText={setNotes} multiline placeholder="Anything we should know?" />
-            </>
-          )}
-
-          {step === 'confirm' && service && price && date && time && (
-            <>
-              <View style={styles.receipt}>
-                <Line label={service.name + (price.mem ? ' (member)' : '')} value={money(price.base)} />
-                {price.peak.add > 0 && <Line label={peakLabel(price.peak, 'RM', price.mem) || 'Peak surcharge'} value={`+ ${money(price.peak.add)}`} />}
-                {pickedAddons.map(a => <Line key={a.id} label={a.name} value={money(price.eff.get(a.id) ?? a.price)} />)}
-                {price.sd > 0 && <Line label="Special discount" value={`− ${money(price.sd)}`} />}
-                {price.tax.tax > 0 && <Line label={`${cfg?.taxName ?? 'Tax'} (${cfg?.taxRate}%${cfg?.taxMode === 'inclusive' ? ', included' : ''})`} value={money(price.tax.tax)} />}
-                {price.tax.rounding > 0 && <Line label="Rounding" value={money(price.tax.rounding)} />}
-                <View style={styles.rule} />
-                <Line label="Total" value={money(total)} bold />
-                {pointsApplied > 0 && <Line label={`Paid with ${pointsName}`} value={`− ${money(pointsApplied)}`} />}
-                {pointsApplied > 0 && <Line label="To pay" value={money(Math.max(0, Math.round((total - pointsApplied) * 100) / 100))} bold />}
-              </View>
-              {pointsOn && balance > 0 && (
-                <View style={[styles.svc, { alignItems: 'center' }]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.svcName}>Use {pointsName}</Text>
-                    <Text style={styles.svcDesc}>Balance {balance.toLocaleString()}</Text>
-                  </View>
-                  <Switch value={usePoints} onValueChange={setUsePoints} trackColor={{ true: accent }} />
-                </View>
-              )}
-              {err && <Notice tone="error">{err}</Notice>}
-              {cfg?.paymentEnabled && !pointsCover && (
-                <Text style={styles.note}>You’ll pay securely with HitPay. Your booking is confirmed once payment goes through.</Text>
-              )}
-            </>
-          )}
-
-          {step === 'paying' && (
-            <View style={{ gap: 14, alignItems: 'center', marginTop: 10 }}>
-              <ActivityIndicator size="large" color={accent} />
-              <Text style={[styles.svcName, { textAlign: 'center' }]}>Waiting for your payment to go through…</Text>
-              <Text style={[styles.sub, { textAlign: 'center' }]}>This screen updates by itself.</Text>
-              {err && <Notice tone="error">{err}</Notice>}
-              <Pressable onPress={cancelPayment} disabled={busy} style={{ padding: 10 }}>
-                <Text style={{ color: bf.danger, fontWeight: '600' }}>{busy ? 'Checking…' : 'I cancelled the payment'}</Text>
-              </Pressable>
-            </View>
-          )}
-
-          {step === 'done' && done && (
-            <View style={{ gap: 12 }}>
-              <View style={styles.doneBadge}><Check size={22} color={bf.good} strokeWidth={3} /></View>
-              <View style={styles.receipt}>
-                <Text style={styles.svcName}>{done.service_name ?? service?.name}</Text>
-                <Text style={styles.svcDesc}>{fmtDate(done.appointment_date ?? date ?? '')} · {fmtTime(done.appointment_time ?? time, timeFormat)}</Text>
-                {(done.addons ?? []).map(a => <Text key={a.id} style={styles.svcDesc}>+ {a.name}</Text>)}
-              </View>
-              <PrimaryButton label="See my bookings" color={accent} onPress={() => { reset(); router.navigate('/'); }} />
-              <Pressable onPress={reset} style={{ alignItems: 'center', padding: 10 }}>
-                <Text style={{ color: bf.ink, fontWeight: '600' }}>Book another</Text>
-              </Pressable>
-            </View>
+      <ScrollView contentContainerStyle={[styles.main, { paddingBottom: showFoot ? 110 : 32 + insets.bottom }]} keyboardShouldPersistTaps="handled">
+        <View style={styles.content}>
+          {suspended && <SuspendedNote />}
+          <View style={suspended ? { opacity: 0.45 } : null} pointerEvents={suspended ? 'none' : 'auto'}>
+            {stepView}
+          </View>
+          {err && !failed && (
+            <View style={styles.formErr}><Text style={styles.formErrText}>{err}</Text></View>
           )}
         </View>
 
-        {/* "Your booking" summary card (web bf-summary) */}
-        {stepIdx >= 0 && (
-          <View style={styles.summary}>
-            <View style={styles.sumHead}>
-              <Text style={styles.sumTitle}>Your booking</Text>
-              <Text style={[styles.sumState, ready ? { color: bf.good } : null]}>{ready ? 'READY' : 'PENDING'}</Text>
-            </View>
-            <SumRow k="SERVICE" v={service?.name} />
-            <SumRow k="DATE" v={date ? fmtDate(date) : undefined} />
-            <SumRow k="TIME" v={time ? `${fmtTime(time, timeFormat)}${service ? ` · ${durationLabel(service, time)}` : ''}` : undefined} />
-            {maidId && <SumRow k="CLEANER" v={maids.find(m => m.id === maidId)?.label} />}
-            {stepIdx >= 2 && <SumRow k="WHERE" v={chosen ? [chosen.unit_number, chosen.address].filter(Boolean).join(', ') : [addr.unit, addr.address].filter(Boolean).join(', ') || undefined} />}
-            {price?.slotPrice != null && <SumRow k="TOTAL" v={money(total)} strong />}
-          </View>
+        {!paying && !failed && (
+          <SummaryCard
+            service={service} isMember={mem} date={date} time={time} timeFormat={timeFormat}
+            addons={pickedAddons.map(a => ({ id: a.id, name: a.name, price: price?.eff.get(a.id) ?? a.price }))}
+            addonTotal={price?.addonTotal ?? 0} priceFrom={price?.from ?? null} slotPrice={price?.slotPrice ?? null}
+            peakName={price?.peak.rule?.name ?? ''} sdAmount={price?.sd ?? 0} sdCfg={price?.sdCfg ?? null}
+            taxRate={cfg?.taxRate ?? 0} taxMode={cfg?.taxMode ?? 'exclusive'} taxName={cfg?.taxName || 'Tax'}
+            tax={price?.tax ?? { tax: 0, total: 0, rounding: 0 }} checkout={step === 4}
+            points={{
+              name: pointsName, enabled: pointsOn && balance > 0, balance, whole, use: usePoints, onToggle: setUsePoints,
+              amount: pointsAmount, onAmount: setPointsAmount, applied: pointsApplied,
+            }}
+          />
         )}
       </ScrollView>
 
-      {/* Bottom bar: Back · Continue (ink) / Pay (accent) — web bf-foot */}
-      <Pressable onPress={() => router.push('/support')} style={[styles.fab, { bottom: (stepIdx >= 0 ? 84 : 24) + insets.bottom }]} accessibilityLabel={t('Chat')}>
+      <Pressable onPress={() => router.push('/support')} style={[styles.fab, { bottom: (showFoot ? 84 : 24) + insets.bottom }]} accessibilityLabel={t('Chat')}>
         <MessageCircle size={26} color="#fff" strokeWidth={2} />
       </Pressable>
-      {stepIdx >= 0 && (
-        <View style={[styles.foot, { paddingBottom: 12 + insets.bottom }]}>
+
+      {/* Bottom bar (web .bf-nav): Back · Continue (ink) / Confirm (accent). */}
+      {showFoot && (
+        <View style={[styles.nav, { paddingBottom: Math.max(6, insets.bottom - 12) + 4 }]}>
           <Pressable onPress={back} style={styles.back} hitSlop={8}>
-            <ArrowLeft size={16} color={bf.muted} />
+            <ArrowLeft size={16} color={bf.muted} strokeWidth={2.5} />
             <Text style={styles.backText}>{t('Back')}</Text>
           </Pressable>
-          {step === 'confirm' ? (
-            <Pressable onPress={submit} disabled={busy} style={[styles.cont, styles.contAccent, busy ? { opacity: 0.5 } : null]}>
-              {busy ? <ActivityIndicator color="#fff" /> : <><Text style={styles.contText}>{payLabel}</Text><ArrowRight size={16} color="#fff" /></>}
+          {step < 4 ? (
+            <Pressable onPress={onContinue} disabled={!canContinue}
+              style={({ pressed }) => [styles.cont, pressed && { backgroundColor: bf.ink2 }, !canContinue && { opacity: 0.4 }]}>
+              <Text style={styles.contText}>{t('Continue')}</Text>
+              <ArrowRight size={16} color="#fff" strokeWidth={2.5} />
             </Pressable>
           ) : (
-            <Pressable onPress={next} disabled={!canNext} style={[styles.cont, !canNext ? { opacity: 0.4 } : null]}>
-              <Text style={styles.contText}>{t('Continue')}</Text>
-              <ArrowRight size={16} color="#fff" />
+            <Pressable onPress={submit} disabled={busy || !canContinue}
+              style={({ pressed }) => [styles.cont, styles.contAccent, pressed && { opacity: 0.92 }, (busy || !canContinue) && { opacity: 0.4 }]}>
+              <Text style={styles.contText}>
+                {busy ? (needsPay ? t('Redirecting…') : t('Confirming…')) : (needsPay ? t('Proceed to payment') : t('Confirm booking'))}
+              </Text>
+              {needsPay ? <CreditCard size={16} color="#fff" strokeWidth={2.5} /> : <Check size={16} color="#fff" strokeWidth={2.5} />}
             </Pressable>
           )}
         </View>
       )}
+
+      <AddonsPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} addons={pricedAddons} selected={pickedAddons.map(a => a.id)} onToggle={toggleAddon} />
+      <AddonSkipConfirm open={skipOpen} onClose={() => setSkipOpen(false)}
+        onConfirm={() => { setSkipOpen(false); advance(); }}
+        addons={pricedAddons} selected={pickedAddons.map(a => a.id)} onToggle={toggleAddon} tenantName={tenant.name} />
     </View>
   );
 }
@@ -595,91 +544,26 @@ function Center({ children }: { children: React.ReactNode }) {
   return <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 12, backgroundColor: bf.ground }}>{children}</View>;
 }
 
-function SumRow({ k, v, strong }: { k: string; v?: string; strong?: boolean }) {
-  return (
-    <View style={styles.sumRow}>
-      <Text style={styles.sumKey}>{k}</Text>
-      <Text style={[styles.sumVal, !v ? styles.sumEmpty : null, strong ? { fontWeight: '700', fontStyle: 'normal' } : null]} numberOfLines={2}>{v ?? 'Not picked yet'}</Text>
-    </View>
-  );
-}
-
-function Line({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
-  const st = { color: bf.ink, fontSize: 15, fontWeight: bold ? ('700' as const) : ('400' as const) };
-  return (
-    <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
-      <Text style={[st, { flexShrink: 1 }]}>{label}</Text>
-      <Text style={st}>{value}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: bf.ground },
-  topbar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: bf.line, backgroundColor: bf.paper },
-  wordmark: { width: 110, height: 34 },
-  kicker: { fontSize: 10, fontWeight: '700', letterSpacing: 2.4, color: bf.muted, marginBottom: 4 },
-  stepper: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
-  dotPast: { backgroundColor: bf.paper, borderColor: bf.ink },
-  swap: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: bf.line, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  main: { paddingTop: 16, paddingHorizontal: 12, gap: 16 },
+  content: {
+    backgroundColor: bf.paper, borderWidth: 1, borderColor: bf.line, borderRadius: 12, paddingVertical: 20, paddingHorizontal: 18, minHeight: 440,
+    shadowColor: '#14140f', shadowOpacity: 0.03, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
+  },
+  formErr: { marginTop: 16, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fee2e2', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  formErrText: { fontSize: 12, color: '#dc2626', lineHeight: 16 },
   fab: {
     position: 'absolute', right: 20, width: 60, height: 60, borderRadius: 30, backgroundColor: accent, alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 6,
   },
-  stepItem: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  dot: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: bf.line, backgroundColor: bf.paper, alignItems: 'center', justifyContent: 'center' },
-  dotOn: { backgroundColor: bf.ink, borderColor: bf.ink },
-  dotText: { fontSize: 11, fontWeight: '700', color: bf.muted },
-  stepLine: { flex: 1, height: 1, backgroundColor: bf.line, marginHorizontal: 6 },
-  content: { paddingHorizontal: 12, paddingBottom: 110, gap: 12 },
-  panel: { backgroundColor: bf.paper, borderWidth: 1, borderColor: bf.line, borderRadius: 14, padding: 18, gap: 10 },
-  h1: { fontSize: 22, fontWeight: '700', color: bf.ink, letterSpacing: -0.4 },
-  sub: { fontSize: 14, color: bf.muted, marginTop: -4, marginBottom: 4 },
-  section: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2, color: bf.muted, marginTop: 10 },
-  svc: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14, backgroundColor: bf.paper, borderWidth: 1, borderColor: bf.line, borderRadius: 10 },
-  svcOn: { borderColor: bf.ink, backgroundColor: bf.raised, shadowColor: bf.ink, shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
-  svcName: { fontSize: 15, fontWeight: '600', color: bf.ink },
-  svcDesc: { fontSize: 13, color: bf.muted, lineHeight: 18 },
-  svcMeta: { fontSize: 12, color: bf.muted, fontFamily: 'monospace', marginTop: 2 },
-  svcPrice: { fontSize: 13, fontWeight: '700', color: bf.ink, textAlign: 'right' },
-  addonPrice: { fontSize: 13, fontWeight: '600', color: bf.ink, textAlign: 'right' },
-  radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: bf.line, marginTop: 2, alignItems: 'center', justifyContent: 'center' },
-  radioOn: { borderColor: bf.ink },
-  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: bf.ink },
-  box: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: bf.line, marginTop: 2, alignItems: 'center', justifyContent: 'center' },
-  boxOn: { backgroundColor: bf.ink, borderColor: bf.ink },
-  day: { width: 58, borderRadius: 10, paddingVertical: 9, alignItems: 'center', gap: 1, backgroundColor: bf.paper, borderWidth: 1, borderColor: bf.line },
-  dayOn: { backgroundColor: bf.ink, borderColor: bf.ink },
-  dayWk: { fontSize: 10, fontWeight: '600', color: bf.muted, letterSpacing: 0.5 },
-  dayNum: { fontSize: 19, fontWeight: '700', color: bf.ink },
-  times: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  time: { width: '48%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 11, borderWidth: 1, borderColor: bf.line, borderRadius: 6, backgroundColor: bf.paper },
-  timeOn: { backgroundColor: bf.ink, borderColor: bf.ink },
-  timeOff: { backgroundColor: bf.raised },
-  timeText: { fontSize: 14, fontWeight: '500', color: bf.ink },
-  timePrice: { fontSize: 12, color: bf.muted },
-  strike: { color: bf.muted2, textDecorationLine: 'line-through' },
-  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  pill: { paddingHorizontal: 13, paddingVertical: 8, borderWidth: 1, borderColor: bf.line, borderRadius: 999, backgroundColor: bf.paper },
-  pillOn: { backgroundColor: bf.ink, borderColor: bf.ink },
-  pillText: { fontSize: 13, fontWeight: '500', color: bf.ink },
-  note: { fontSize: 12, color: bf.muted, lineHeight: 17 },
-  receipt: { backgroundColor: bf.raised, borderWidth: 1, borderColor: bf.line, borderRadius: 10, padding: 14, gap: 7 },
-  rule: { height: 1, backgroundColor: bf.line, marginVertical: 2 },
-  doneBadge: { width: 48, height: 48, borderRadius: 24, backgroundColor: bf.goodSoft, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
-  summary: { backgroundColor: bf.raised, borderWidth: 1, borderColor: bf.line, borderRadius: 14, padding: 16, gap: 10 },
-  sumHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  sumTitle: { fontSize: 15, fontWeight: '700', color: bf.ink },
-  sumState: { fontSize: 11, fontWeight: '700', letterSpacing: 2, color: bf.muted },
-  sumRow: { flexDirection: 'row', gap: 12, borderTopWidth: 1, borderTopColor: bf.line, paddingTop: 9 },
-  sumKey: { width: 76, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, color: bf.muted, fontFamily: 'monospace', paddingTop: 1 },
-  sumVal: { flex: 1, fontSize: 14, color: bf.ink },
-  sumEmpty: { color: bf.muted2, fontStyle: 'italic' },
-  foot: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12, backgroundColor: bf.ground, borderTopWidth: 1, borderTopColor: bf.line },
-  back: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  backText: { fontSize: 14, fontWeight: '600', color: bf.muted },
-  cont: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: bf.ink, borderRadius: 8, paddingHorizontal: 18, paddingVertical: 12 },
-  contAccent: { backgroundColor: accent, shadowColor: accent, shadowOpacity: 0.5, shadowRadius: 10, shadowOffset: { width: 0, height: 6 }, elevation: 4 },
-  contText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  nav: {
+    position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+    paddingTop: 10, paddingHorizontal: 12, backgroundColor: '#ffffff', borderTopWidth: 1, borderTopColor: line2,
+  },
+  back: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 8 },
+  backText: { fontSize: 13, fontWeight: '500', color: bf.muted },
+  cont: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: bf.ink, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 },
+  contAccent: { backgroundColor: accent, shadowColor: accent, shadowOpacity: 0.6, shadowRadius: 10, shadowOffset: { width: 0, height: 8 }, elevation: 4 },
+  contText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 });

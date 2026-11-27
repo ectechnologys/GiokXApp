@@ -4,22 +4,22 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { ArrowDownToLine, ChevronDown, ChevronsUpDown, Coins, Crown, TrendingDown, TrendingUp, X, Zap } from 'lucide-react-native';
+import { router } from 'expo-router';
+import { ArrowDownToLine, ChevronDown, ChevronsUpDown, Coins, Crown, Download, TrendingDown, TrendingUp, Zap } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, Pattern, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import { AppHeader } from '@/components/AppHeader';
-import { usePayment } from '@/components/booking/Extras';
 import { Notice } from '@/components/ui';
+import { ReloadSheet, type ReloadResult } from '@/components/credits/ReloadSheet';
+import { statementHtml, stmtDate, type StatementCompany } from '@/components/credits/statementPdf';
 import { PageCard } from '@/components/web';
 import { tenant } from '@/config/tenant';
 import type { CoinTxn } from '@/lib/booking';
-import { startPointsReload, type ReloadConfig } from '@/lib/extras';
 import { fmtMonth, fmtShortDate, useT } from '@/lib/i18n';
+import { invoiceMarkerOf } from '@/lib/invoice';
 import { useCoins, useProfile } from '@/lib/queries';
-import { useSession } from '@/lib/session';
 import { accent, accentSoft, bf, gray, heroColors } from '@/lib/theme';
 
 const wordmark = require('@/assets/tenant/wordmark.png');
@@ -134,98 +134,12 @@ function MembershipHero({ onReload }: { onReload: () => void }) {
   );
 }
 
-function ReloadSheet({ cfg, pointsName, balance, onClose, onResult }: {
-  cfg: ReloadConfig; pointsName: string; balance: number; onClose: () => void; onResult: (r: { tone: 'ok' | 'warn' | 'error'; text: string }) => void;
-}) {
-  const { t } = useT();
-  const insets = useSafeAreaInsets();
-  const { session } = useSession();
-  const pay = usePayment(session!.token);
-  const [selected, setSelected] = useState<number | null>(cfg.tiers[0]?.amount ?? null);
-  const [custom, setCustom] = useState('');
-  const [busy, setBusy] = useState(false);
-  const customAmount = Number(custom) || 0;
-  const usingCustom = custom.trim() !== '';
-  const amount = usingCustom ? customAmount : (selected ?? 0);
-  const bonus = cfg.tiers.find(x => x.amount === amount)?.bonus ?? 0;
-  const belowMin = usingCustom && customAmount > 0 && customAmount < cfg.custom_min;
-  const canPay = amount > 0 && !belowMin && !busy;
-
-  const go = async () => {
-    setBusy(true);
-    try {
-      const out = await pay.run(() => startPointsReload(session!.token, amount));
-      onResult(out === 'done'
-        ? { tone: 'ok', text: `${fmtPts(amount + bonus)} ${pointsName} ${t('added')}.` }
-        : { tone: 'warn', text: t("The reload payment didn't complete — nothing was charged and no {points} were added.", { points: pointsName }) });
-      onClose();
-    } catch (e) {
-      onResult({ tone: 'error', text: (e as Error).message });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
-        <View style={styles.sheetHead}>
-          <Text style={styles.sheetTitle}>{t('Reload {points}', { points: pointsName })}</Text>
-          <Pressable onPress={onClose} hitSlop={10}><X size={20} color={gray[500]} /></Pressable>
-        </View>
-        <Text style={styles.sheetSub}>{t('Current balance')}: <Text style={{ fontWeight: '700', color: gray[900] }}>{fmtPts(balance)}</Text></Text>
-        {pay.waiting ? (
-          <View style={{ alignItems: 'center', gap: 10, paddingVertical: 20 }}>
-            <ActivityIndicator color={accent} />
-            <Text style={{ color: gray[600] }}>{t('Confirming your {points} reload…', { points: pointsName })}</Text>
-            <Pressable onPress={pay.cancel}><Text style={{ color: '#dc2626', fontWeight: '600' }}>{t('I cancelled the payment')}</Text></Pressable>
-          </View>
-        ) : (
-          <>
-            {cfg.tiers.length > 0 && (
-              <>
-                <Text style={styles.sheetLabel}>{t('Choose an amount').toUpperCase()}</Text>
-                <View style={styles.tiers}>
-                  {cfg.tiers.map(x => {
-                    const on = !usingCustom && selected === x.amount;
-                    return (
-                      <Pressable key={x.amount} onPress={() => { setSelected(x.amount); setCustom(''); }} style={[styles.tier, on && { borderColor: accent, backgroundColor: accentSoft }]}>
-                        <Text style={styles.tierAmt}>RM {x.amount.toLocaleString()}</Text>
-                        {x.bonus > 0 && <Text style={styles.tierBonus}>+{x.bonus.toLocaleString()} {t('reward')}</Text>}
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </>
-            )}
-            {cfg.custom_enabled && (
-              <>
-                <Text style={styles.sheetLabel}>{`${t('Or a custom amount')} (${t('min')} RM ${cfg.custom_min})`.toUpperCase()}</Text>
-                <TextInput value={custom} onChangeText={v => setCustom(v.replace(/[^\d.]/g, ''))} keyboardType="decimal-pad"
-                  placeholder={t('e.g. {n}', { n: cfg.custom_min })} placeholderTextColor={gray[400]} style={styles.customInput} />
-                {belowMin && <Text style={{ fontSize: 11, color: '#dc2626' }}>{t('Minimum reload is RM {n}.', { n: cfg.custom_min })}</Text>}
-              </>
-            )}
-            <View style={styles.sumBox}>
-              <View style={styles.sumRow}><Text style={styles.sumKey}>{t('You pay')}</Text><Text style={styles.sumVal}>RM {fmtPts(amount)}</Text></View>
-              <View style={styles.sumRow}><Text style={styles.sumKey}>{t('You receive')}</Text><Text style={styles.sumVal}>{fmtPts(amount + bonus)} {pointsName}</Text></View>
-            </View>
-            <Pressable onPress={go} disabled={!canPay} style={[styles.payBig, !canPay && { opacity: 0.45 }]}>
-              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.payBigText}>{t('Pay')} RM {fmtPts(amount)}</Text>}
-            </Pressable>
-            <Text style={styles.sheetNote}>{t('Secure payment via HitPay. {points} are credited the moment payment completes.', { points: pointsName })}</Text>
-          </>
-        )}
-      </View>
-    </Modal>
-  );
-}
-
 function HistoryCard() {
   const { t } = useT();
   const q = useCoins();
-  const profile = useProfile().data?.customer;
+  const profileQ = useProfile().data;
+  const profile = profileQ?.customer;
+  const addresses = profileQ?.addresses;
   const data = q.data;
   const pointsName = data?.points_name ?? '';
   const txns = useMemo(() => data?.transactions ?? [], [data]);
@@ -259,21 +173,27 @@ function HistoryCard() {
 
   const exportPdf = async () => {
     const rows = scope === 'all' ? txns : grouped.find(([k]) => k === scope)?.[1] ?? [];
-    const esc = (s: string) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
-    const html = `<html><head><meta name="viewport" content="width=device-width"><style>
-      body{font-family:-apple-system,Roboto,sans-serif;color:#111827;padding:28px}h1{font-size:20px;margin:0}
-      .sub{color:#6b7280;font-size:12px;margin:4px 0 18px}table{width:100%;border-collapse:collapse;font-size:12px}
-      th{text-align:left;color:#9ca3af;font-size:10px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid #e5e7eb;padding:6px 4px}
-      td{border-bottom:1px solid #f3f4f6;padding:7px 4px}.r{text-align:right;font-family:monospace}.p{color:#059669}.n{color:#ef4444}</style></head><body>
-      <h1>${esc(tenant.name)} · ${esc(pointsName)}</h1>
-      <div class="sub">${esc(profile?.name ?? '')} · ${esc(profile?.phone_e164 ?? '')} · ${esc(scope === 'all' ? t('All (last 3 months)') : monthLabel(scope))}</div>
-      <table><tr><th>${t('Date')}</th><th>${t('Description')}</th><th class="r">${t('Amount')}</th><th class="r">${t('Balance')}</th></tr>
-      ${rows.map(x => `<tr><td>${fmtShortDate(x.created_at)}</td><td>${esc(friendlyDesc(x.description || x.reason || x.type))}</td>
-        <td class="r ${x.amount >= 0 ? 'p' : 'n'}">${signed(x.amount)}</td><td class="r">${fmtPts(balanceAfter.get(x.id) ?? 0)}</td></tr>`).join('')}
-      </table></body></html>`;
+    // English like the web statement (its PDF font has no Chinese glyphs).
+    const monthEn = (k: string) => { const [y, mo] = k.split('-').map(Number); return new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }); };
     try {
-      const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });
+      const html = await statementHtml({
+        company: (data as { company?: StatementCompany | null } | undefined)?.company ?? null,
+        pointsName,
+        balance: data?.balance ?? 0,
+        periodLabel: scope === 'all' ? 'Last 3 months' : monthEn(scope),
+        customer: { name: profile?.name ?? '', phone: profile?.phone_e164 ?? null, email: profile?.email ?? null },
+        address: addresses?.[0] ?? null,
+        expires: data?.expires ?? null,
+        rows: rows.map(x => ({
+          date: stmtDate(x.created_at),
+          desc: friendlyDesc(x.description || x.reason || '—'),
+          type: x.type,
+          amount: signed(x.amount),
+          balance: fmtPts(balanceAfter.get(x.id) ?? 0),
+        })),
+      });
+      const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
+      await Sharing.shareAsync(uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf', dialogTitle: t('Export PDF') });
     } catch (e) {
       Alert.alert(t('Export PDF'), (e as Error).message);
     }
@@ -323,6 +243,17 @@ function HistoryCard() {
                             <Text style={styles.txnDesc} numberOfLines={1}>{friendlyDesc(x.description || x.reason || x.type)}</Text>
                             <Text style={styles.txnDate}>{fmtShortDate(x.created_at)}</Text>
                           </View>
+                          {(() => {
+                            const inv = invoiceMarkerOf(x.description || '');
+                            if (!inv) return null;
+                            return (
+                              <Pressable onPress={() => router.push({ pathname: '/booking/[id]/invoice', params: { id: inv, number: inv } })}
+                                hitSlop={8} accessibilityLabel={t('Download invoice')}
+                                style={({ pressed }) => [styles.invBtn, pressed && { backgroundColor: gray[100] }]}>
+                                <Download size={14} color={gray[400]} strokeWidth={2.25} />
+                              </Pressable>
+                            );
+                          })()}
                           <View style={{ alignItems: 'flex-end' }}>
                             <Text style={[styles.txnAmt, { color: pos ? '#059669' : '#ef4444' }]}>{signed(x.amount)}</Text>
                             <Text style={styles.txnBal}>{t('Bal')} {fmtPts(balanceAfter.get(x.id) ?? 0)}</Text>
@@ -345,7 +276,7 @@ export default function Credits() {
   const coins = useCoins();
   const profile = useProfile();
   const [reload, setReload] = useState(false);
-  const [msg, setMsg] = useState<{ tone: 'ok' | 'warn' | 'error'; text: string } | null>(null);
+  const [msg, setMsg] = useState<ReloadResult | null>(null);
   return (
     <View style={{ flex: 1, backgroundColor: bf.ground }}>
       <AppHeader />
@@ -410,22 +341,5 @@ const styles = StyleSheet.create({
   txnDate: { fontSize: 10, color: gray[400] },
   txnAmt: { fontSize: 12, fontWeight: '700', fontFamily: 'monospace' },
   txnBal: { fontSize: 10, color: gray[400], fontFamily: 'monospace' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 12 },
-  sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  sheetTitle: { fontSize: 17, fontWeight: '700', color: gray[900] },
-  sheetSub: { fontSize: 12, color: gray[500] },
-  sheetLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, color: gray[400], marginTop: 4 },
-  tiers: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  tier: { width: '31%', borderWidth: 1, borderColor: gray[200], borderRadius: 12, paddingVertical: 10, alignItems: 'center', gap: 2 },
-  tierAmt: { fontSize: 14, fontWeight: '700', color: gray[900] },
-  tierBonus: { fontSize: 10, fontWeight: '700', color: '#d97706' },
-  customInput: { borderWidth: 1, borderColor: gray[200], borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: gray[900] },
-  sumBox: { backgroundColor: gray[50], borderRadius: 12, padding: 12, gap: 6 },
-  sumRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  sumKey: { fontSize: 12, color: gray[500] },
-  sumVal: { fontSize: 13, fontWeight: '700', color: gray[900] },
-  payBig: { backgroundColor: accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  payBigText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  sheetNote: { fontSize: 11, color: gray[400], textAlign: 'center' },
+  invBtn: { padding: 4, borderRadius: 6 },
 });
