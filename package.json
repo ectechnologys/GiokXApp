@@ -1,0 +1,10 @@
+{
+  "name": "giokx-mobile",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "customer": "npm --workspace @giokx/customer run start",
+    "customer:android": "npm --workspace @giokx/customer run android",
+    "typecheck": "npm --workspace @giokx/customer run typecheck"
+  }
+}
