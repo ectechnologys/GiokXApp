@@ -4,11 +4,12 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { CalendarDays, Camera, CheckCircle2, Clock, Download, ExternalLink, MapPin, MessageCircle, Plus, Star, X, Zap } from 'lucide-react-native';
+import { CalendarDays, Camera, CheckCircle2, Clock, Download, ExternalLink, MapPin, MessageCircle, Plus, Star, Users, X, Zap } from 'lucide-react-native';
 import { memo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CrewModal } from '@/components/booking/Crew';
 import { AddExtras, VanPills, usePayment } from '@/components/booking/Extras';
 import { Badge } from '@/components/web';
 import type { CustomerBooking } from '@/lib/api';
@@ -63,6 +64,7 @@ export const BookingRow = memo(function BookingRow({ b, token, timeFormat, muted
   const [paying, setPaying] = useState(false);
   const [payMsg, setPayMsg] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [crewOpen, setCrewOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [photoErr, setPhotoErr] = useState<string | null>(null);
@@ -178,6 +180,11 @@ export const BookingRow = memo(function BookingRow({ b, token, timeFormat, muted
           )}
         </View>
         <View style={styles.idRight}>
+          {(b.assignees?.length ?? 0) > 0 && (
+            <Pressable onPress={() => setCrewOpen(true)} hitSlop={8} style={{ padding: 4 }} accessibilityLabel={t('View assigned crew')}>
+              <Users size={14} color={gray[400]} strokeWidth={2.25} />
+            </Pressable>
+          )}
           {chatOn && b.chat_open && (
             <Pressable onPress={() => router.push({ pathname: '/booking/[id]/chat', params: { id: b.id } })} style={styles.chatBtn}>
               <MessageCircle size={14} color={gray[500]} strokeWidth={2.5} /><Text style={styles.chatText}>{t('Chat')}</Text>
@@ -315,6 +322,8 @@ export const BookingRow = memo(function BookingRow({ b, token, timeFormat, muted
           )}
         </View>
       )}
+
+      <CrewModal assignees={b.assignees ?? []} visible={crewOpen} onClose={() => setCrewOpen(false)} />
 
       {/* Add-ons sheet */}
       <Modal visible={addOpen} animationType="slide" transparent onRequestClose={() => setAddOpen(false)}>
