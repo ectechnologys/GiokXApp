@@ -239,6 +239,7 @@ export const ZH_ACCOUNT: Record<string, string> = {
   "It's deducted from your account credit — if your balance is short, you'll be asked to top up first.": "费用将从您的账户余额中扣除 — 如果余额不足，需要先充值。",
   "It's deducted from your refund — you'll get back {net} as {points}.": "费用将从退款中扣除 — 您将收回 {net}（以{points}形式）。",
   "Keep booking": "保留预约",
+  "It's deducted from your {points} wallet.": "费用将从您的{points}钱包中扣除。",
   "Cancelling…": "取消中…",
   "Cancel booking": "取消预约",
   "Could not cancel — please try again.": "无法取消 — 请重试。",

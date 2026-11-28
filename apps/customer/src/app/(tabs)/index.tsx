@@ -7,6 +7,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, T
 
 import { AppHeader } from '@/components/AppHeader';
 import { BookingRow } from '@/components/BookingRow';
+import { CancelSheet } from '@/components/booking/CancelSheet';
 import { Notice } from '@/components/ui';
 import { PageCard } from '@/components/web';
 import { canCancel, useCancelBooking } from '@/lib/cancel';
@@ -115,6 +116,7 @@ export default function Appointments() {
           )}
         </PageCard>
       </ScrollView>
+      <CancelSheet {...cancel.sheet} />
     </View>
   );
 }

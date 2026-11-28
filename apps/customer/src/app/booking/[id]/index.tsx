@@ -1,40 +1,19 @@
 // One booking: when, where, who's coming, payment, live progress, cancel.
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Badge, progressOf } from '@/components/BookingCard';
 import { SectionLabel, WCard } from '@/components/web';
 import { AddExtras, PayBalance, Photos, Review, VanPills } from '@/components/booking/Extras';
 import { Notice } from '@/components/ui';
-import { cancelBooking, type CustomerBooking } from '@/lib/api';
 import { canHaveInvoice } from '@/lib/extras';
-import { fmtDate, fmtStamp, fmtTime, money, todayIso, wallClockToUtcMs } from '@/lib/format';
-import { queryClient, useBookings, useProfile } from '@/lib/queries';
+import { fmtDate, fmtStamp, fmtTime, money } from '@/lib/format';
+import { useBookings, useCoins, useProfile } from '@/lib/queries';
+import { useCancelBooking } from '@/lib/cancel';
+import { CancelSheet } from '@/components/booking/CancelSheet';
 import { useSession } from '@/lib/session';
-import { useDisplaySettings, type DisplaySettings } from '@/lib/settings';
+import { useDisplaySettings } from '@/lib/settings';
 import { accent, gray, useColors } from '@/lib/theme';
-
-const isPaid = (b: CustomerBooking) => b.payment_status === 'paid' || b.payment_status === 'cash';
-
-/** Cancellation fee the server will apply (web: feePreview). */
-function feePreview(b: CustomerBooking, fee: DisplaySettings['cancelFee'] | undefined, member?: { is_member: boolean; member_start: string | null; member_expires: string | null }) {
-  if (!fee?.enabled || fee.amount <= 0) return null;
-  if (fee.waiveMember && member) {
-    const bd = b.booking_date.slice(0, 10);
-    const ms = String(member.member_start ?? '').slice(0, 10);
-    const me = String(member.member_expires ?? '').slice(0, 10);
-    if (ms && me && bd >= ms && bd <= me && (bd < todayIso() || member.is_member)) return null;
-  }
-  const hoursUntil = (wallClockToUtcMs(fee.timezone, b.booking_date, b.start_time ?? '00:00') - Date.now()) / 3_600_000;
-  if (fee.hours > 0 && hoursUntil > fee.hours) return null;
-  const gross = isPaid(b) ? Number(b.total_amount ?? 0) : Number(b.redeemed_amount ?? 0);
-  if (gross > 0) {
-    const f = Math.min(fee.amount, gross);
-    return { fee: f, net: Math.round((gross - f) * 100) / 100, hours: fee.hours, fromCredit: false };
-  }
-  return { fee: fee.amount, net: 0, hours: fee.hours, fromCredit: true };
-}
 
 export default function BookingDetail() {
   const c = useColors();
@@ -43,12 +22,12 @@ export default function BookingDetail() {
   const bookings = useBookings();
   const profile = useProfile();
   const settings = useDisplaySettings();
-  const [cancelling, setCancelling] = useState(false);
-  const [msg, setMsg] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
+  const pointsName = useCoins().data?.points_name ?? '';
+  const cancel = useCancelBooking(session?.token ?? '', settings.data, profile.data?.customer, pointsName);
+  const msg = cancel.msg;
 
   const b = bookings.data?.find(x => x.id === id);
   const timeFormat = settings.data?.timeFormat ?? '12h';
-  const fee = useMemo(() => (b ? feePreview(b, settings.data?.cancelFee, profile.data?.customer) : null), [b, settings.data, profile.data]);
 
   if (!b) {
     return (
@@ -62,38 +41,7 @@ export default function BookingDetail() {
   const canCancel = b.status !== 'cancelled' && b.status !== 'completed' && !b.team_started_at && !b.team_completed_at;
   const progress = progressOf(b);
 
-  const confirmCancel = () => {
-    const refund = isPaid(b)
-      ? `You've paid ${money(b.total_amount)}. It will be returned to your account as credit for your next booking. No cash refund.`
-      : b.redeemed_amount > 0
-        ? `The ${b.redeemed_amount.toLocaleString()} points you redeemed will be returned to your account.`
-        : 'This booking will be cancelled.';
-    const feeText = !fee ? '' : `\n\nA ${money(fee.fee)} cancellation fee applies${fee.hours > 0 ? ` within ${fee.hours} hours of the booking time` : ''}. ` +
-      (fee.fromCredit ? 'It is taken from your account credit.' : `It is deducted from your refund: you get back ${money(fee.net)}.`);
-    Alert.alert('Cancel this booking?', `${b.service_name} · ${fmtDate(b.booking_date)} · ${fmtTime(b.start_time, timeFormat)}\n\n${refund}${feeText}`, [
-      { text: 'Keep booking', style: 'cancel' },
-      { text: 'Cancel booking', style: 'destructive', onPress: doCancel },
-    ]);
-  };
-
-  const doCancel = async () => {
-    if (!session) return;
-    setCancelling(true);
-    setMsg(null);
-    try {
-      const r = await cancelBooking(session.token, b.id);
-      if (r.ok === false) {
-        setMsg({ tone: 'warn', text: `A ${money(r.cancellation_fee)} cancellation fee applies, but your account credit is ${money(r.points_balance)}. Please top up ${money(r.shortfall)} first, then cancel again.` });
-        return;
-      }
-      await queryClient.invalidateQueries({ queryKey: ['bookings'] });
-      setMsg({ tone: 'ok', text: 'Booking cancelled.' });
-    } catch (e) {
-      setMsg({ tone: 'error', text: (e as Error).message });
-    } finally {
-      setCancelling(false);
-    }
-  };
+  const cancelling = cancel.busyId === b.id;
 
   return (
     <ScrollView
@@ -171,7 +119,7 @@ export default function BookingDetail() {
       )}
 
       {canCancel && (
-        <Pressable onPress={confirmCancel} disabled={cancelling}
+        <Pressable onPress={() => cancel.confirm(b)} disabled={cancelling}
           style={({ pressed }) => [styles.cancel, { opacity: cancelling ? 0.5 : pressed ? 0.7 : 1 }]}>
           <Text style={{ color: '#c62828', fontWeight: '700', fontSize: 16 }}>{cancelling ? 'Cancelling…' : 'Cancel booking'}</Text>
         </Pressable>
@@ -179,6 +127,7 @@ export default function BookingDetail() {
       <Pressable onPress={() => router.back()} style={{ alignItems: 'center', padding: 8 }}>
         <Text style={{ color: c.muted }}>Back to bookings</Text>
       </Pressable>
+      <CancelSheet {...cancel.sheet} />
     </ScrollView>
   );
 }

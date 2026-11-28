@@ -1,11 +1,10 @@
 // Cancelling a booking: the fee preview the web shows, the confirm dialog, and
 // the call. Shared by the appointment rows.
 import { useState } from 'react';
-import { Alert } from 'react-native';
 
 import { cancelBooking, type CustomerBooking } from '@/lib/api';
 import { money, todayIso, wallClockToUtcMs } from '@/lib/format';
-import { fmtBookingDate, fmtBookingTime, t } from '@/lib/i18n';
+import { t } from '@/lib/i18n';
 import { queryClient } from '@/lib/queries';
 import type { DisplaySettings } from '@/lib/settings';
 
@@ -39,6 +38,8 @@ export type Msg = { tone: 'ok' | 'error' | 'warn'; text: string };
 export function useCancelBooking(token: string, settings: DisplaySettings | undefined, member: Parameters<typeof feePreview>[2], pointsName: string) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [msg, setMsg] = useState<Msg | null>(null);
+  const [target, setTarget] = useState<CustomerBooking | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   const run = async (b: CustomerBooking) => {
     setBusyId(b.id);
@@ -46,6 +47,7 @@ export function useCancelBooking(token: string, settings: DisplaySettings | unde
     try {
       const r = await cancelBooking(token, b.id);
       if (r.ok === false) {
+        setTarget(null);
         setMsg({ tone: 'warn', text: t('A {fee} cancellation fee applies, but your {points} balance is {bal}. Please reload at least {short} first, then cancel again.', {
           fee: money(r.cancellation_fee), points: pointsName || t('points'), bal: money(r.points_balance), short: money(r.shortfall),
         }) });
@@ -55,33 +57,27 @@ export function useCancelBooking(token: string, settings: DisplaySettings | unde
         queryClient.invalidateQueries({ queryKey: ['bookings'] }),
         queryClient.invalidateQueries({ queryKey: ['coins'] }),
       ]);
+      setTarget(null);
       setMsg({ tone: 'ok', text: t('Booking cancelled.') });
     } catch (e) {
-      setMsg({ tone: 'error', text: (e as Error).message });
+      setErr((e as Error).message);
     } finally {
       setBusyId(null);
     }
   };
 
-  const confirm = (b: CustomerBooking) => {
-    const fee = feePreview(b, settings?.cancelFee, member);
-    const pts = pointsName || t('points');
-    const refund = isPaid(b)
-      ? t("You've paid {amount} for this booking. It'll be returned to your account as {points} you can use on your next booking — no cash refund.", { amount: money(b.total_amount), points: pts })
-      : b.redeemed_amount > 0
-        ? t('The {n} {points} you redeemed will be returned to your account.', { n: b.redeemed_amount.toLocaleString(), points: pts })
-        : '';
-    const feeText = !fee ? '' : `\n\n${t('A {fee} cancellation fee applies within {h} hours of the booking time.', { fee: money(fee.fee), h: fee.hours })} ` +
-      (fee.fromCredit ? t('It is taken from your {points}.', { points: pts }) : t('You get back {net}.', { net: money(fee.net) }));
-    Alert.alert(
-      t('Cancel this booking?'),
-      `${b.service_name} · ${fmtBookingDate(b.booking_date)} · ${fmtBookingTime(b.start_time, settings?.timeFormat ?? '12h')}${refund ? `\n\n${refund}` : ''}${feeText}`,
-      [
-        { text: t('Keep booking'), style: 'cancel' },
-        { text: t('Cancel booking'), style: 'destructive', onPress: () => run(b) },
-      ],
-    );
+  // The web-style "Cancel this booking?" sheet (components/booking/CancelSheet).
+  const confirm = (b: CustomerBooking) => { setMsg(null); setErr(null); setTarget(b); };
+  const sheet = {
+    b: target,
+    fee: target ? feePreview(target, settings?.cancelFee, member) : null,
+    pointsName,
+    timeFormat: settings?.timeFormat ?? '12h',
+    busy: !!target && busyId === target.id,
+    err,
+    onKeep: () => { setTarget(null); setErr(null); },
+    onCancel: () => { if (target) run(target); },
   };
 
-  return { confirm, busyId, msg, clear: () => setMsg(null) };
+  return { confirm, busyId, msg, sheet, clear: () => setMsg(null) };
 }
