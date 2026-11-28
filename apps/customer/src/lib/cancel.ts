@@ -27,8 +27,10 @@ export function feePreview(b: CustomerBooking, fee: DisplaySettings['cancelFee']
   if (fee.hours > 0 && hoursUntil > fee.hours) return null;
   const gross = isPaid(b) ? Number(b.total_amount ?? 0) : Number(b.redeemed_amount ?? 0);
   if (gross > 0) {
+    // What's withheld is capped at the refund (the server does the same), but
+    // the notice states the company's full fee, as the web does.
     const f = Math.min(fee.amount, gross);
-    return { fee: f, net: Math.round((gross - f) * 100) / 100, hours: fee.hours, fromCredit: false };
+    return { fee: fee.amount, net: Math.round((gross - f) * 100) / 100, hours: fee.hours, fromCredit: false };
   }
   return { fee: fee.amount, net: 0, hours: fee.hours, fromCredit: true };
 }
