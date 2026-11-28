@@ -7,6 +7,7 @@ import { ApiError, callFunction } from '@/lib/api';
 import type { PeakRule } from '@/shared/peakPricing';
 import type { SpecialDiscountConfig } from '@/shared/specialDiscount';
 import type { TaxMode } from '@/shared/tax';
+import { paymentReturnOrigin } from '@/lib/payReturn';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -286,11 +287,11 @@ export const createBooking = (token: string, p: CreateBookingPayload) =>
   post<BookingSuccess & { ok: true; booking_ref: string }>('customer-create-booking', token, { ...p });
 
 /** Payment tenants: HitPay checkout URL, or paid_in_full when points cover it.
- *  HitPay returns the browser to the tenant's web site, whose success page
- *  shows the result; the app polls payments-status for its own screen. */
+ *  HitPay returns the browser tab to the app (lib/payReturn.ts); the app polls
+ *  payments-status for its own screen. */
 export const startPayment = (token: string, p: CreateBookingPayload & { redeem_points?: boolean; redeem_points_amount?: number }) =>
   post<BookingSuccess & { ok: true; checkout_url?: string; hold_token?: string; paid_in_full?: boolean; redeemed_amount?: number }>(
-    'payments-start', token, { return_origin: `https://${tenant.host}`, ...p },
+    'payments-start', token, { return_origin: paymentReturnOrigin, ...p },
   );
 
 export interface PaymentStatus extends BookingSuccess {

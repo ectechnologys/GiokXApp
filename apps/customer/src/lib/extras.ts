@@ -1,6 +1,7 @@
 // Booking extras: pay a balance, add add-ons, photos, chat, van ETA, reviews,
 // invoice. Same edge functions and payloads as the web /account page
 // (src/lib/customerApi.ts).
+import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
@@ -9,6 +10,7 @@ import { FN_BASE, SUPABASE_ANON_KEY } from '@/config/backend';
 import { tenant } from '@/config/tenant';
 import { ApiError, callFunction } from '@/lib/api';
 import { paymentStatus, type PaymentStatus } from '@/lib/booking';
+import { paymentReturnOrigin } from '@/lib/payReturn';
 
 async function postJson<T>(fn: string, token: string, body: Record<string, unknown>): Promise<T> {
   const res = await fetch(`${FN_BASE}/${fn}`, {
@@ -33,7 +35,7 @@ async function postForm<T>(fn: string, token: string, form: FormData): Promise<T
   return data as T;
 }
 
-const returnOrigin = `https://${tenant.host}`;
+const returnOrigin = paymentReturnOrigin;
 
 // ── HitPay checkout shared by every payment button ───────────────────────────
 
@@ -126,7 +128,10 @@ export async function pickPhoto(source: 'camera' | 'library'): Promise<{ uri: st
   return { uri: img.uri, name: `photo-${Date.now()}.jpg` };
 }
 
-const filePart = (f: { uri: string; name: string }) => ({ uri: f.uri, name: f.name, type: 'image/jpeg' }) as unknown as Blob;
+// Expo's fetch (SDK 52+) rejects React Native's `{ uri }` parts ("Unsupported
+// FormDataPart implementation"); it takes any part with name/type and bytes().
+const filePart = (f: { uri: string; name: string }) =>
+  ({ name: f.name, type: 'image/jpeg', bytes: () => new File(f.uri).bytes() }) as unknown as Blob;
 
 export function uploadBookingPhoto(token: string, bookingId: string, f: { uri: string; name: string }) {
   const form = new FormData();
