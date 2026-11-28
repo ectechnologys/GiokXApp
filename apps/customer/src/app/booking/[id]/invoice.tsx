@@ -9,7 +9,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { Notice, PrimaryButton } from '@/components/ui';
 import { ApiError } from '@/lib/api';
@@ -23,9 +23,13 @@ import { useBookings } from '@/lib/queries';
 import { useSession } from '@/lib/session';
 import { accent, useColors } from '@/lib/theme';
 
-/** The 560 px web sheet, enlarged so its 8 px body text reads at ~12 on a phone. */
-const S = 1.45;
-const U = (mm: number) => PX(mm) * S;
+/** The web / PDF sheet: an A4 page 560 px wide (mm → px with PX), laid out at
+ *  that size and scaled to the phone's width so it looks like the real page.
+ *  A tap zooms it in for reading (scroll sideways), another tap fits it again. */
+const U = (mm: number) => PX(mm);
+const PAGE_W = 560;
+const PAGE_H = Math.round(PAGE_W * 297 / 210);
+const ZOOM = 1.3;
 
 export default function Invoice() {
   const c = useColors();
@@ -76,17 +80,42 @@ export default function Invoice() {
   return (
     <ScrollView style={{ backgroundColor: '#f3f4f6' }} contentContainerStyle={{ padding: 12, gap: 14, paddingBottom: 32 }}>
       <Stack.Screen options={{ title }} />
-      <Sheet v={v} />
+      <Page v={v} />
       {err && <Notice tone="error">{err}</Notice>}
       <PrimaryButton label={t('Download invoice')} busy={busy} onPress={share} />
     </ScrollView>
   );
 }
 
+function Page({ v }: { v: DocView }) {
+  const { t } = useT();
+  const { width } = useWindowDimensions();
+  const fit = (width - 24) / PAGE_W;
+  const [zoom, setZoom] = useState(false);
+  const [h, setH] = useState(PAGE_H);
+  const k = zoom ? Math.max(fit, ZOOM) : fit;
+  const page = (
+    <Pressable onPress={() => setZoom(z => !z)} accessibilityHint={t(zoom ? 'Tap to fit the page' : 'Tap to zoom in')}>
+      <View style={[styles.paper, { width: PAGE_W * k, height: h * k }]}>
+        <View onLayout={e => setH(e.nativeEvent.layout.height)}
+          style={{ width: PAGE_W, position: 'absolute', left: 0, top: 0, transform: [{ translateX: -PAGE_W * (1 - k) / 2 }, { translateY: -h * (1 - k) / 2 }, { scale: k }] }}>
+          <Sheet v={v} />
+        </View>
+      </View>
+    </Pressable>
+  );
+  return (
+    <View style={{ gap: 6 }}>
+      {zoom ? <ScrollView horizontal showsHorizontalScrollIndicator={false}>{page}</ScrollView> : page}
+      <Text style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center' }}>{t(zoom ? 'Tap the invoice to fit the page' : 'Tap the invoice to zoom in')}</Text>
+    </View>
+  );
+}
+
 /** Native copy of the Classic template (same structure, colours, proportions). */
 function Sheet({ v }: { v: DocView }) {
   const cfg = v.cfg, hd = cfg.headerColor;
-  const m = 14;
+  const m = U(14);
   const logoH = U(13) * (cfg.logoSize / 100);
   const lines = companyLines(v.company, cfg);
   const sClr = v.payStatus ? (STATUS_CLR[v.payStatus] ?? '#ca8a04') : '';
@@ -95,7 +124,7 @@ function Sheet({ v }: { v: DocView }) {
 
   return (
     <View style={styles.sheet}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 22, paddingHorizontal: m, gap: 10 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: U(15), paddingHorizontal: m, gap: U(4) }}>
         <View style={{ flex: 1, minWidth: 0 }}>
           {cfg.showLogo && (v.company.logoUrl
             ? <Image source={{ uri: v.company.logoUrl }} style={{ height: logoH, width: U(70), alignSelf: 'flex-start' }} contentFit="contain" contentPosition="left" />
@@ -111,7 +140,7 @@ function Sheet({ v }: { v: DocView }) {
             </View>
           )}
         </View>
-        <Text style={{ fontSize: U(9), fontWeight: '700', color: '#1a1a1a', lineHeight: U(9) * 1.05 }}>{v.label}</Text>
+        <Text style={{ fontSize: U(11), fontWeight: '700', color: '#1a1a1a', lineHeight: U(11) * 1.05 }}>{v.label}</Text>
       </View>
 
       <View style={{ marginHorizontal: m, marginVertical: U(3), height: 1, backgroundColor: '#ddd' }} />
@@ -211,9 +240,10 @@ function Meta({ l, r }: { l: string; r: string }) {
 }
 
 const styles = StyleSheet.create({
-  sheet: {
-    backgroundColor: '#fff', paddingBottom: 28, borderRadius: 4,
-    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+  sheet: { backgroundColor: '#fff', minHeight: PAGE_H, paddingBottom: U(14) },
+  paper: {
+    backgroundColor: '#fff', overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
   party: { fontSize: U(3), color: '#606060' },
   cell: { paddingVertical: U(1.8), paddingHorizontal: U(1.5) },
