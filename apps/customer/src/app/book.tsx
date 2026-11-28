@@ -1,8 +1,10 @@
 // New booking — the web BookingFlowPage wizard on a phone:
 //   date-first:    1 Date → 2 Service & time → 3 Your details → 4 Confirm → 5 Done
 //   service-first: 1 Service → 2 Date & time → 3 Your details → 4 Confirm → 5 Done
-// (⇆ on the stepper swaps the order). "Book multiple dates" (when the company
-// turned it on) multi-selects up to 10 dates on the calendar, then each date's
+// (⇆ on the stepper swaps the order). When the company allows multi-date
+// booking, tapping a second date turns the calendar into a multi-select (up
+// to 10; tap a date again to remove it, back to one date = a normal booking),
+// then each date's
 // visit is completed one by one and all of them go through one checkout
 // (payments-start multi_bookings). Same rules and the same edge functions
 // as the web; the server re-checks everything. Presentation lives in
@@ -19,7 +21,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AddonsPalette, AddonSkipConfirm, type PricedAddon } from '@/components/bookflow/AddonSheets';
 import { formatBookingId, line2, redeemCap, redeemClamp, StepHead, Stepper } from '@/components/bookflow/atoms';
 import { DetailsStep, type AddrDraft } from '@/components/bookflow/DetailsStep';
-import { applyVisitAddons, MULTI_MAX, MultiAddonPrompt, MultiTick, type MultiPick } from '@/components/bookflow/multi';
+import { applyVisitAddons, MULTI_MAX, MultiAddonPrompt, type MultiPick } from '@/components/bookflow/multi';
 import { ClosedStep, ServiceStep, SuspendedNote, TimesPanel, type ServiceCard, type TimeRow } from '@/components/bookflow/pickers';
 import { ConfirmStep, PayingStep, PaymentFailedStep, SuccessStep } from '@/components/bookflow/ResultSteps';
 import { SummaryCard } from '@/components/bookflow/SummaryCard';
@@ -234,18 +236,28 @@ export default function Book() {
     }
     setTime(null); setMaidId(null);
   };
-  const onToggleMulti = (on: boolean) => {
-    setMultiOn(on);
-    setMultiPicks([]);
-    setTime(null); setMaidId(null);
-    // Ticking carries the picked single date in as the first of the set.
-    setMultiDates(on && singleDate ? [singleDate] : []);
-    // Extras are chosen per visit in multi mode, so a single-booking pick is dropped.
-    setAddonIds([]);
-    // Unticking returns to a clean single booking.
-    if (!on) {
-      setDate(null);
-      if (order === 'date-first') setService(null);
+  // Calendar tap with multi-date booking on (no tick, as asked): the same
+  // date again clears it, another date while one is picked starts a series
+  // with both, and a series shrunk back to one date is a normal booking again
+  // — that date keeps its finished visit's time, team and extras.
+  const tapDate = (k: string, single: (d: string) => void) => {
+    if (!multiOn) {
+      if (k === singleDate) { setDate(null); setTime(null); setMaidId(null); return; }
+      if (!singleDate || !cfg?.multiBookingEnabled) { single(k); return; }
+      setMultiOn(true); setMultiPicks([]);
+      setMultiDates([singleDate, k].sort());
+      setTime(null); setMaidId(null);
+      return;
+    }
+    const left = multiDates.includes(k) ? multiDates.filter(x => x !== k) : null;
+    if (!left || left.length > 1) { toggleMultiDate(k); return; }
+    const keep = left[0] ? multiPicks.find(p => p.dateKey === left[0]) : undefined;
+    setMultiOn(false); setMultiDates([]); setMultiPicks([]);
+    setDate(left[0] ?? null);
+    setTime(keep?.time ?? null); setMaidId(keep?.requestedMaidId ?? null);
+    if (keep) {
+      setAddonIds(keep.addonIds);
+      if (order === 'date-first') setService((svcQ.data ?? []).find(x => x.id === keep.serviceId) ?? null);
     }
   };
   // Finish the working date's visit at time `tm` and move on to the next date.
@@ -604,16 +616,19 @@ export default function Book() {
         onSave: time ? () => recordPick(time) : undefined,
       } : undefined} />
   );
-  // Multi mode: a tap toggles the date in/out of the set instead.
+  // Every tap goes through tapDate (single pick, add / remove in a series).
   const calendar = (onPick: (d: string) => void, match: Parameters<typeof MonthCalendar>[0]['slotMatches']) => (
     <MonthCalendar value={multiOn ? null : date} today={today} minDate={minDate} maxDate={end} holidays={holidays}
       allowHoliday={!!cfg?.allowHolidayBooking} token={token} slotMatches={match} disabled={paused}
-      onPick={multiOn ? toggleMultiDate : onPick}
+      onPick={k => tapDate(k, onPick)}
       multi={multiOn ? { dates: multiDates, done: multiPicks.map(p => p.dateKey), working: workingDateKey } : undefined} />
   );
-  // "Book multiple dates" tick + the step's sub line (web DateTimeStep head).
-  const multiTick = cfg?.multiBookingEnabled ? <MultiTick on={multiOn} onToggle={onToggleMulti} /> : undefined;
-  const calSub = multiOn ? t('Pick up to {n} dates, then a time for each one.', { n: MULTI_MAX }) : t('Pick a date, then a time slot.');
+  // The step's sub line says how to pick several dates (web DateTimeStep head).
+  const calSub = multiOn
+    ? t('{n} dates picked (up to {max}). Tap a date again to remove it.', { n: multiDates.length, max: MULTI_MAX })
+    : cfg?.multiBookingEnabled
+      ? t('Pick a date, then a time slot. Tap more dates to book several visits in one payment.')
+      : t('Pick a date, then a time slot.');
   const noDates = dates.length === 0 && (
     <Notice tone="warn">{cfg?.bookingFrom ? `Online booking opens for dates from ${fmtDate(cfg.bookingFrom)}.` : 'No dates are open for booking right now.'}</Notice>
   );
@@ -629,7 +644,7 @@ export default function Book() {
     if (step === 1 && order === 'date-first') {
       return (
         <View>
-          <StepHead title={t('When would you like it?')} sub={calSub} aside={multiTick} />
+          <StepHead title={t('When would you like it?')} sub={calSub} />
           {calendar(d => {
             if (d !== date) { setTime(null); setMaidId(null); setService(null); setAddonIds([]); }
             setDate(d);
@@ -654,7 +669,7 @@ export default function Book() {
     if (step === 2) {
       return (
         <View>
-          <StepHead title={t('When works for you?')} sub={calSub} aside={multiTick} />
+          <StepHead title={t('When works for you?')} sub={calSub} />
           <View style={{ gap: 14 }}>
             {calendar(d => { if (d !== date) { setTime(null); setMaidId(null); } setDate(d); }, x => keys.has(slotKey(x)))}
             {noDates}

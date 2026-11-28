@@ -1,5 +1,5 @@
 // Multi-date checkout (web BookingFlowPage: MultiPick, MULTI_MAX, the
-// .bf-multi-tick pill on the date step and MultiAddonPrompt, the per-visit
+// MultiAddonPrompt, the per-visit
 // "Add extras to any visit" sheet raised on Continue).
 import { X } from 'lucide-react-native';
 import { useState } from 'react';
@@ -38,19 +38,6 @@ export interface MultiPick {
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
-
-/** "☐ Book multiple dates  up to 10 · one payment" (web .bf-multi-tick). */
-export function MultiTick({ on, onToggle }: { on: boolean; onToggle: (on: boolean) => void }) {
-  const { t } = useT();
-  return (
-    <Pressable onPress={() => onToggle(!on)} accessibilityRole="checkbox" accessibilityState={{ checked: on }}
-      style={({ pressed }) => [st.tick, pressed && { backgroundColor: bf.hover }]}>
-      <Tick on={on} size={15} radius={3} />
-      <Text style={st.tickLabel}>{t('Book multiple dates')}</Text>
-      <Text style={st.tickEm}>{t('up to {n} · one payment', { n: MULTI_MAX })}</Text>
-    </Pressable>
-  );
-}
 
 /** Extras chosen for a visit in the sheet, each priced by that visit's own
  *  membership and the member-special mode (web priceMemberAddonSet). */
@@ -183,12 +170,6 @@ export function MultiAddonPrompt({ open, onClose, onConfirm, visits, tenantName,
 }
 
 const st = StyleSheet.create({
-  tick: {
-    flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingVertical: 7, paddingHorizontal: 12,
-    backgroundColor: bf.raised, borderWidth: 1, borderColor: bf.line, borderRadius: 10,
-  },
-  tickLabel: { fontSize: 12.5, fontWeight: '600', color: bf.ink2 },
-  tickEm: { fontSize: 11, fontWeight: '500', color: bf.muted },
 
   head: { paddingTop: 18, paddingHorizontal: 20, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: line2 },
   headK: { fontSize: 10.5, fontWeight: '700', letterSpacing: 2.1, textTransform: 'uppercase', color: accent, marginBottom: 5 },

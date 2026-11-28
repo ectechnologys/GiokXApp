@@ -56,6 +56,8 @@ export const ZH_BOOKING: Record<string, string> = {
   "up to {n} · one payment": "最多 {n} 个 · 一次付款",
   "Pick up to {n} dates, then a time for each one.": "最多选 {n} 个日期，然后为每个日期选时间。",
   "Pick a date, then a time slot.": "先选日期，再选时段。",
+  "Pick a date, then a time slot. Tap more dates to book several visits in one payment.": "先选日期，再选时段。多点几个日期可一次付款预约多次。",
+  "{n} dates picked (up to {max}). Tap a date again to remove it.": "已选 {n} 个日期（最多 {max} 个）。再点一次可取消该日期。",
   "Previous month": "上个月",
   "Next month": "下个月",
   "Bookings open up to {n} days ahead": "最多可提前 {n} 天预约",
