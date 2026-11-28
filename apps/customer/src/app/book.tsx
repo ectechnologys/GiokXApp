@@ -12,7 +12,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { ArrowLeft, ArrowRight, Check, CreditCard, MessageCircle } from 'lucide-react-native';
+import { ArrowLeft, ArrowRight, Check, CreditCard } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -745,10 +745,6 @@ export default function Book() {
         )}
       </ScrollView>
 
-      <Pressable onPress={() => router.push('/support')} style={[styles.fab, { bottom: (showFoot ? 84 : 24) + insets.bottom }]} accessibilityLabel={t('Chat')}>
-        <MessageCircle size={26} color="#fff" strokeWidth={2} />
-      </Pressable>
-
       {/* Bottom bar (web .bf-nav): Back · Continue (ink) / Confirm (accent). */}
       {showFoot && (
         <View style={[styles.nav, { paddingBottom: Math.max(6, insets.bottom - 12) + 4 }]}>
@@ -798,10 +794,6 @@ const styles = StyleSheet.create({
   },
   formErr: { marginTop: 16, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fee2e2', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   formErrText: { fontSize: 12, color: '#dc2626', lineHeight: 16 },
-  fab: {
-    position: 'absolute', right: 20, width: 60, height: 60, borderRadius: 30, backgroundColor: accent, alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 6,
-  },
   nav: {
     position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12,
     paddingTop: 10, paddingHorizontal: 12, backgroundColor: '#ffffff', borderTopWidth: 1, borderTopColor: line2,
