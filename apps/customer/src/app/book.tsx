@@ -1,7 +1,10 @@
 // New booking — the web BookingFlowPage wizard on a phone:
 //   date-first:    1 Date → 2 Service & time → 3 Your details → 4 Confirm → 5 Done
 //   service-first: 1 Service → 2 Date & time → 3 Your details → 4 Confirm → 5 Done
-// (⇆ on the stepper swaps the order). Same rules and the same edge functions
+// (⇆ on the stepper swaps the order). "Book multiple dates" (when the company
+// turned it on) multi-selects up to 10 dates on the calendar, then each date's
+// visit is completed one by one and all of them go through one checkout
+// (payments-start multi_bookings). Same rules and the same edge functions
 // as the web; the server re-checks everything. Presentation lives in
 // src/components/bookflow/.
 import { useQuery } from '@tanstack/react-query';
@@ -16,6 +19,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AddonsPalette, AddonSkipConfirm, type PricedAddon } from '@/components/bookflow/AddonSheets';
 import { formatBookingId, line2, redeemCap, redeemClamp, StepHead, Stepper } from '@/components/bookflow/atoms';
 import { DetailsStep, type AddrDraft } from '@/components/bookflow/DetailsStep';
+import { applyVisitAddons, MULTI_MAX, MultiAddonPrompt, MultiTick, type MultiPick } from '@/components/bookflow/multi';
 import { ClosedStep, ServiceStep, SuspendedNote, TimesPanel, type ServiceCard, type TimeRow } from '@/components/bookflow/pickers';
 import { ConfirmStep, PayingStep, PaymentFailedStep, SuccessStep } from '@/components/bookflow/ResultSteps';
 import { SummaryCard } from '@/components/bookflow/SummaryCard';
@@ -26,7 +30,7 @@ import { ApiError } from '@/lib/api';
 import {
   createBooking, getAddons, getBookingConfig, getCoins, getHolidays, getPeakRules, getServices, getSlots,
   memberOn, paymentStatus, priceAddons, serviceSlotKeys, serviceTimes, slotKey, slotMinutes, startPayment,
-  windowDays, type AddonRow, type BookingSuccess, type CreateBookingPayload, type ServiceRow,
+  windowDays, type AddonRow, type BookingSuccess, type CreateBookingPayload, type MultiBookingItem, type ServiceRow,
 } from '@/lib/booking';
 import { fmtDate, todayIso } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -48,6 +52,7 @@ const addDays = (iso: string, n: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 const hourOf = (t: string) => parseInt(t.slice(0, 2), 10);
+const r2 = (n: number) => Math.round(n * 100) / 100;
 const EMPTY_ADDR: AddrDraft = { unit: '', address: '', postcode: '', city: '', lobby: '' };
 
 export default function Book() {
@@ -74,7 +79,9 @@ export default function Book() {
   useEffect(() => { scroller.current?.scrollTo({ y: 0, animated: false }); }, [step]);
   const [service, setService] = useState<ServiceRow | null>(null);
   const [addonIds, setAddonIds] = useState<string[]>([]); // pick order matters
-  const [date, setDate] = useState<string | null>(null);
+  // Single booking: the picked date. Multi-date checkout: unused — `date`
+  // below then points at the visit being configured (web workingDateKey).
+  const [singleDate, setDate] = useState<string | null>(null);
   const [pickedTime, setTime] = useState<string | null>(null);
   const [pickedMaid, setMaidId] = useState<string | null>(null);
   const [pickedAddr, setPickedAddr] = useState<string | null>(null);
@@ -90,6 +97,25 @@ export default function Book() {
   const [done, setDone] = useState<(BookingSuccess & { booking_ref?: string }) | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [skipOpen, setSkipOpen] = useState(false);
+
+  // ── Multi-date checkout (web multiOn / multiDates / multiPicks) ───────────
+  const [multiOn, setMultiOn] = useState(false);
+  const [multiDates, setMultiDates] = useState<string[]>([]); // sorted
+  const [multiPicks, setMultiPicks] = useState<MultiPick[]>([]);
+  const [multiPromptOpen, setMultiPromptOpen] = useState(false);
+  // Visits a HitPay checkout covers, and the hold token still being polled
+  // after 'confirmed' while the finalizer writes the remaining visits.
+  const [expected, setExpected] = useState(1);
+  const [catchUp, setCatchUp] = useState<string | null>(null);
+  // The earliest ticked date without a finished visit — the one the pickers
+  // configure. When every date is done, the pickers park on the last one.
+  const workingDateKey = multiOn ? multiDates.find(k => !multiPicks.some(p => p.dateKey === k)) ?? null : null;
+  const date = multiOn ? workingDateKey ?? multiDates[multiDates.length - 1] ?? null : singleDate;
+  // Date-first series on a phone: the service list sits above the times, so
+  // each next visit starts back at the top (the web shows them side by side).
+  useEffect(() => {
+    if (multiOn && step === 2 && order === 'date-first' && workingDateKey) scroller.current?.scrollTo({ y: 0, animated: true });
+  }, [multiOn, step, order, workingDateKey]);
 
   const addonsQ = useQuery({ queryKey: ['addons', service?.id], queryFn: () => getAddons(service!.id), enabled: !!service });
   const addons = useMemo(() => addonsQ.data ?? [], [addonsQ.data]);
@@ -194,10 +220,88 @@ export default function Book() {
     });
   }, [addons, pickedAddons, mem, cfg?.memberSpecialAddonMode]);
 
+  // ── Multi-date helpers (web toggleMultiDate / recordPickTime / …) ────────
+  const addonMode = cfg?.memberSpecialAddonMode ?? 'all';
+  // Calendar tap: toggle the date in/out of the set (max 10). Removing a date
+  // drops its finished visit too. A held time belongs to the old visit.
+  const toggleMultiDate = (k: string) => {
+    if (multiDates.includes(k)) {
+      setMultiDates(multiDates.filter(x => x !== k));
+      setMultiPicks(ps => ps.filter(p => p.dateKey !== k));
+    } else {
+      if (multiDates.length >= MULTI_MAX) return;
+      setMultiDates([...multiDates, k].sort());
+    }
+    setTime(null); setMaidId(null);
+  };
+  const onToggleMulti = (on: boolean) => {
+    setMultiOn(on);
+    setMultiPicks([]);
+    setTime(null); setMaidId(null);
+    // Ticking carries the picked single date in as the first of the set.
+    setMultiDates(on && singleDate ? [singleDate] : []);
+    // Extras are chosen per visit in multi mode, so a single-booking pick is dropped.
+    setAddonIds([]);
+    // Unticking returns to a clean single booking.
+    if (!on) {
+      setDate(null);
+      if (order === 'date-first') setService(null);
+    }
+  };
+  // Finish the working date's visit at time `tm` and move on to the next date.
+  const recordPick = (tm: string) => {
+    if (!service || !workingDateKey) return;
+    const wk = workingDateKey;
+    const member = memberOn(cust, wk);
+    const em = peakServiceMember(wk, service.id, member, rules);
+    const match = (service.service_time_slots ?? []).find(s => (s.available_time ?? '').slice(0, 5) === tm.slice(0, 5));
+    const slotBase = match ? Number(em && match.member_price != null && Number(match.member_price) > 0 ? match.member_price : match.price ?? 0) : 0;
+    const base = match ? applyPeak(slotBase, wk, service.id, member, rules) : 0;
+    const peakName = resolvePeak(slotBase, wk, service.id, member, rules).rule?.name ?? '';
+    const eff = priceAddons(pickedAddons, member, addonMode);
+    const extras = pickedAddons.map(a => ({ id: a.id, name: a.name, price: eff.get(a.id) ?? Number(a.price ?? 0) }));
+    const hourMaids = byHour[hourOf(tm)]?.maids ?? [];
+    const maid = pickedTime === tm && maidId ? hourMaids.find(m => m.id === maidId) ?? null : null;
+    const pick: MultiPick = {
+      dateKey: wk, serviceId: service.id, serviceName: service.name, time: tm,
+      price: r2(base + extras.reduce((sum, a) => sum + a.price, 0)), basePrice: base, peakName,
+      addons: extras, addonIds: pickedAddons.map(a => a.id), serviceAddons: addons, member,
+      requestedMaidId: maid?.id ?? null, requestedMaidLabel: maid?.label,
+    };
+    setMultiPicks(ps => [...ps.filter(p => p.dateKey !== wk), pick]);
+    // Every visit answers for itself: the next one starts on "Any available",
+    // with no extras, and (date-first) its own service.
+    setTime(null); setMaidId(null); setAddonIds([]);
+    if (order === 'date-first') setService(null);
+  };
+  // Time tap in multi mode: commits the visit outright, unless the hour offers
+  // a team choice — then hold it so "Save this visit" can follow the pick.
+  const onTimeMulti = (tm: string) => {
+    if ((byHour[hourOf(tm)]?.maids.length ?? 0) > 0) setTime(tm);
+    else recordPick(tm);
+  };
+  const removeMultiPick = (k: string) => {
+    setMultiPicks(ps => ps.filter(p => p.dateKey !== k));
+    setTime(null); setMaidId(null);
+  };
+  // Visits with no extras whose service offers some (web multiPicksMissingAddons).
+  const missingAddons = multiPicks.filter(p => p.addonIds.length === 0 && p.serviceAddons.length > 0);
+  // Totals over every visit: Special Discount per visit (as the server bills
+  // it), tax on the sum — the figure points redeem against.
+  const multiTotals = (() => {
+    if (!multiOn || !cfg) return null;
+    const sum = r2(multiPicks.reduce((acc, p) => acc + p.price, 0));
+    const sdCfg = specialDiscountFor(cfg.specialDiscount, cust);
+    const sd = r2(multiPicks.reduce((acc, p) => acc + computeSpecialDiscount(sdCfg, !!cust?.has_special_discount,
+      { servicePrice: p.basePrice, addonsTotal: Math.max(0, p.price - p.basePrice) }), 0));
+    const tax = computeTax(Math.max(0, r2(sum - sd)), cfg.taxRate, cfg.taxMode, cfg.taxRoundUp);
+    return { sd, sdCfg, tax };
+  })();
+
   // ── Points (web redeemCap / redeemClamp) ──────────────────────────────────
   const pointsOn = !!cfg?.paymentEnabled && !!cfg?.pointsRedemptionEnabled && !!coinsQ.data?.enabled;
   const balance = Math.max(0, Number(coinsQ.data?.balance ?? 0));
-  const total = price?.tax.total ?? 0;
+  const total = multiOn ? multiTotals?.tax.total ?? 0 : price?.tax.total ?? 0;
   const whole = !!cfg?.pointsRedeemWhole;
   const maxRedeem = redeemCap(balance, total, whole);
   const pointsApplied = pointsOn && usePoints && balance > 0 ? redeemClamp(pointsAmount ?? maxRedeem, maxRedeem, whole, total) : 0;
@@ -226,34 +330,34 @@ export default function Book() {
     setStep(1); setService(null); setAddonIds([]); setDate(null); setTime(null); setMaidId(null);
     setNotes(''); setUsePoints(false); setPointsAmount(null); setErr(null); setHold(null); setDone(null);
     setPaying(false); setFailed(null);
+    setMultiOn(false); setMultiDates([]); setMultiPicks([]); setExpected(1); setCatchUp(null);
   };
   const back = () => {
     setErr(null);
     if (step === 1) { router.back(); return; }
     const nextStep = (step - 1) as Step;
-    if (nextStep === 1 && order === 'service-first') { setDate(null); setTime(null); }
+    if (nextStep === 1 && order === 'service-first') { setDate(null); setTime(null); setMultiDates([]); setMultiPicks([]); }
     setStep(nextStep);
   };
   const swapOrder = () => {
     setOrder(o => (o === 'date-first' ? 'service-first' : 'date-first'));
     setService(null); setAddonIds([]); setDate(null); setTime(null); setMaidId(null); setStep(1); setErr(null);
+    setMultiOn(false); setMultiDates([]); setMultiPicks([]);
   };
   const advance = () => { setErr(null); setStep(s => Math.min(5, s + 1) as Step); };
   const onContinue = () => {
     const isServicePickStep = (order === 'service-first' && step === 1) || (order === 'date-first' && step === 2);
-    if (isServicePickStep && addons.length > 0 && pickedAddons.length === 0) { setSkipOpen(true); return; }
+    // Multi-date: extras are per visit, so ask per visit instead (web MultiAddonPrompt).
+    if (multiOn && step === 2 && missingAddons.length > 0) { setMultiPromptOpen(true); return; }
+    if (isServicePickStep && !multiOn && addons.length > 0 && pickedAddons.length === 0) { setSkipOpen(true); return; }
     advance();
   };
   const end = dates.length ? dates[dates.length - 1] : today;
   const minDate = dates[0] ?? today;
 
   // ── Submit ───────────────────────────────────────────────────────────────
-  const payload = (): CreateBookingPayload => ({
-    service_id: service!.id,
-    appointment_date: date!,
-    appointment_time: time!,
-    duration_minutes: slotMinutes(service!, time),
-    selected_addon_ids: pickedAddons.map(a => a.id),
+  // Address, notes — the same for every visit of a multi-date checkout.
+  const shared = () => ({
     notes: notes.trim() || undefined,
     house_unit: addr.unit.trim(),
     address: addr.address.trim(),
@@ -262,7 +366,29 @@ export default function Book() {
     address_lat: pinLat ?? null,
     address_lng: pinLng ?? null,
     lobby_note: addr.lobby.trim() || undefined,
+  });
+  const payload = (): CreateBookingPayload => ({
+    service_id: service!.id,
+    appointment_date: date!,
+    appointment_time: time!,
+    duration_minutes: slotMinutes(service!, time),
+    selected_addon_ids: pickedAddons.map(a => a.id),
+    ...shared(),
     requested_maid_id: maidId,
+  });
+
+  // Multi-date: one item per finished visit, each with its own service, date,
+  // time, extras and (if chosen) team member — the address etc. is shared.
+  const visitItems = (): MultiBookingItem[] => multiPicks.map(p => {
+    const svc = (svcQ.data ?? []).find(x => x.id === p.serviceId);
+    return {
+      service_id: p.serviceId,
+      appointment_date: p.dateKey,
+      appointment_time: p.time,
+      duration_minutes: svc ? slotMinutes(svc, p.time) : undefined,
+      selected_addon_ids: p.addonIds,
+      ...(p.requestedMaidId ? { requested_maid_id: p.requestedMaidId } : {}),
+    };
   });
 
   const finish = (r: BookingSuccess) => {
@@ -282,14 +408,20 @@ export default function Book() {
   };
 
   const submit = async () => {
-    if (!token) return;
+    if (!token || (multiOn && multiPicks.length === 0)) return;
     setBusy(true); setErr(null);
     try {
       if (!cfg?.paymentEnabled) {
+        if (multiOn) { await createVisits(); return; }
         finish(await createBooking(token, payload()));
         return;
       }
-      const r = await startPayment(token, { ...payload(), redeem_points: pointsApplied > 0, redeem_points_amount: pointsApplied || undefined });
+      const items = multiOn ? visitItems() : [];
+      const body: CreateBookingPayload & { multi_bookings?: MultiBookingItem[] } = multiOn
+        ? { ...shared(), ...items[0], ...(items.length > 1 ? { multi_bookings: items } : {}) }
+        : payload();
+      setExpected(multiOn ? items.length : 1);
+      const r = await startPayment(token, { ...body, redeem_points: pointsApplied > 0, redeem_points_amount: pointsApplied || undefined });
       if (r.paid_in_full) { finish(r); return; }
       if (!r.checkout_url || !r.hold_token) throw new Error('Payment could not be started. Please try again.');
       setHold(r.hold_token);
@@ -302,6 +434,45 @@ export default function Book() {
     }
   };
 
+  // No-payment tenants, multi-date (web): one create call per visit. Dates run
+  // side by side; visits on the same date in order. On a failure the visits
+  // already created are dropped from the list so a retry never repeats them.
+  const createVisits = async () => {
+    if (!token) return;
+    const items = visitItems();
+    const base = shared();
+    const made: (BookingSuccess | null)[] = items.map(() => null);
+    const byDate = new Map<string, number[]>();
+    items.forEach((it, i) => byDate.set(it.appointment_date, [...(byDate.get(it.appointment_date) ?? []), i]));
+    let firstFailure: unknown = null;
+    await Promise.all([...byDate.values()].map(async idxs => {
+      for (const i of idxs) {
+        try { made[i] = await createBooking(token, { ...base, ...items[i] }); }
+        catch (e) { firstFailure = firstFailure ?? e; return; }
+      }
+    }));
+    const created = made.filter((x): x is BookingSuccess => !!x);
+    if (firstFailure) {
+      const doneKeys = new Set(items.filter((_, i) => made[i]).map(it => it.appointment_date));
+      setMultiPicks(ps => ps.filter(p => !doneKeys.has(p.dateKey)));
+      if (created.length) {
+        queryClient.invalidateQueries({ queryKey: ['bookings'] });
+        const refs = created.map(c => formatBookingId(c.booking_id)).join(', ');
+        const f = firstFailure as Error;
+        throw new ApiError(`${f.message} — ${created.length} of ${items.length} bookings were already created (${refs}); the rest were not.`,
+          f instanceof ApiError ? f.code : 'unknown', f instanceof ApiError ? f.status : 0);
+      }
+      throw firstFailure;
+    }
+    finish({
+      ...created[0],
+      bookings: created.map(c => ({
+        booking_id: c.booking_id ?? '', service_name: c.service_name ?? '', appointment_date: c.appointment_date ?? '',
+        appointment_time: c.appointment_time ?? '', addons: c.addons,
+      })),
+    });
+  };
+
   const paymentFailed = (f: Failed) => { setFailed(f); setPaying(false); setHold(null); };
 
   // While paying: poll until HitPay confirms, or the hold is released.
@@ -312,7 +483,12 @@ export default function Book() {
       try {
         const s = await paymentStatus(token, hold);
         if (stop) return;
-        if (s.status === 'confirmed') finish(s);
+        if (s.status === 'confirmed') {
+          // Multi-slot: the finalizer writes visits one by one — show the
+          // confirmation now and keep filling the list in behind it.
+          if (expected > 1 && (s.bookings?.length ?? 0) < expected) setCatchUp(hold);
+          finish(s);
+        }
         else if (s.status === 'released') {
           paymentFailed({ tone: 'amber', headline: t("Payment didn't go through"), subtext: t('The payment window closed without completing. Try again — your booking details are still filled in.') });
         } else if (s.status === 'expired') {
@@ -326,12 +502,35 @@ export default function Book() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paying, hold, token]);
 
+  // After a multi-slot 'confirmed': poll until every visit is in (≈30 s max).
+  useEffect(() => {
+    if (!catchUp || !token) return;
+    let stop = false;
+    let n = 0;
+    const iv = setInterval(async () => {
+      n += 1;
+      try {
+        const s = await paymentStatus(token, catchUp);
+        if (stop) return;
+        if (s.status === 'confirmed') {
+          setDone(s);
+          if ((s.bookings?.length ?? 0) >= expected) setCatchUp(null);
+        }
+      } catch { /* keep polling */ }
+      if (n >= 30 && !stop) setCatchUp(null);
+    }, 1000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [catchUp, token, expected]);
+
   const cancelPayment = async () => {
     if (!token || !hold) return;
     setBusy(true);
     try {
       const s = await paymentStatus(token, hold, true); // server re-checks with HitPay first
-      if (s.status === 'confirmed') finish(s);
+      if (s.status === 'confirmed') {
+        if (expected > 1 && (s.bookings?.length ?? 0) < expected) setCatchUp(hold);
+        finish(s);
+      }
       else paymentFailed({ tone: 'gray', headline: t('Payment cancelled'), subtext: t("No worries — nothing was charged. Your booking details are still filled in if you'd like to try again.") });
     } catch (e) {
       setErr((e as Error).message);
@@ -359,7 +558,9 @@ export default function Book() {
   const canContinue = (() => {
     if (suspended) return false;
     if (paused && (step === 1 || step === 2)) return false;
-    if (step === 1) return order === 'date-first' ? !!date : !!service;
+    if (step === 1) return order === 'date-first' ? (multiOn ? multiDates.length > 0 : !!date) : !!service;
+    // Multi-date: every ticked date needs its finished visit.
+    if (step === 2 && multiOn) return multiDates.length > 0 && !workingDateKey;
     if (step === 2) return order === 'date-first' ? !!service && !!time : !!date && !!time;
     if (step === 3) return addressOk;
     return true;
@@ -394,13 +595,25 @@ export default function Book() {
     return [{ time: tm, price: price?.perHour[h] ?? null, blocked }];
   }) : [];
   const times = (
-    <TimesPanel date={date} rows={service ? timeRows : []} timeFormat={timeFormat} time={time} onTime={setTime}
-      maids={service ? maids : []} maidId={maidId} onMaid={setMaidId} emptyHint />
+    <TimesPanel date={date} rows={service ? timeRows : []} timeFormat={timeFormat} time={time} onTime={multiOn ? onTimeMulti : setTime}
+      maids={service ? maids : []} maidId={maidId} onMaid={setMaidId} emptyHint
+      multi={multiOn ? {
+        count: multiDates.length,
+        working: workingDateKey,
+        index: workingDateKey ? multiDates.indexOf(workingDateKey) + 1 : 0,
+        onSave: time ? () => recordPick(time) : undefined,
+      } : undefined} />
   );
+  // Multi mode: a tap toggles the date in/out of the set instead.
   const calendar = (onPick: (d: string) => void, match: Parameters<typeof MonthCalendar>[0]['slotMatches']) => (
-    <MonthCalendar value={date} today={today} minDate={minDate} maxDate={end} holidays={holidays}
-      allowHoliday={!!cfg?.allowHolidayBooking} token={token} slotMatches={match} disabled={paused} onPick={onPick} />
+    <MonthCalendar value={multiOn ? null : date} today={today} minDate={minDate} maxDate={end} holidays={holidays}
+      allowHoliday={!!cfg?.allowHolidayBooking} token={token} slotMatches={match} disabled={paused}
+      onPick={multiOn ? toggleMultiDate : onPick}
+      multi={multiOn ? { dates: multiDates, done: multiPicks.map(p => p.dateKey), working: workingDateKey } : undefined} />
   );
+  // "Book multiple dates" tick + the step's sub line (web DateTimeStep head).
+  const multiTick = cfg?.multiBookingEnabled ? <MultiTick on={multiOn} onToggle={onToggleMulti} /> : undefined;
+  const calSub = multiOn ? t('Pick up to {n} dates, then a time for each one.', { n: MULTI_MAX }) : t('Pick a date, then a time slot.');
   const noDates = dates.length === 0 && (
     <Notice tone="warn">{cfg?.bookingFrom ? `Online booking opens for dates from ${fmtDate(cfg.bookingFrom)}.` : 'No dates are open for booking right now.'}</Notice>
   );
@@ -416,7 +629,7 @@ export default function Book() {
     if (step === 1 && order === 'date-first') {
       return (
         <View>
-          <StepHead title={t('When would you like it?')} sub={t('Pick a date, then a time slot.')} />
+          <StepHead title={t('When would you like it?')} sub={calSub} aside={multiTick} />
           {calendar(d => {
             if (d !== date) { setTime(null); setMaidId(null); setService(null); setAddonIds([]); }
             setDate(d);
@@ -441,7 +654,7 @@ export default function Book() {
     if (step === 2) {
       return (
         <View>
-          <StepHead title={t('When works for you?')} sub={t('Pick a date, then a time slot.')} />
+          <StepHead title={t('When works for you?')} sub={calSub} aside={multiTick} />
           <View style={{ gap: 14 }}>
             {calendar(d => { if (d !== date) { setTime(null); setMaidId(null); } setDate(d); }, x => keys.has(slotKey(x)))}
             {noDates}
@@ -455,9 +668,10 @@ export default function Book() {
         onPick={id => setPickedAddr(id)} onUseNew={() => { setPickedAddr('__new'); setDraft(EMPTY_ADDR); }}
         draft={draft} setDraft={setDraft} chosen={chosen} coverage={coverage} notes={notes} setNotes={setNotes} />;
     }
-    if (step === 4 && service && date && time && price) {
-      return <ConfirmStep tenantName={tenant.name} serviceName={service.name} slotPrice={price.slotPrice} isMember={mem}
-        date={date} time={time} timeFormat={timeFormat} addons={pickedAddons} addonTotal={price.addonTotal}
+    if (step === 4 && (multiOn ? multiPicks.length > 0 : !!(service && date && time && price))) {
+      return <ConfirmStep tenantName={tenant.name} serviceName={service?.name ?? ''} slotPrice={price?.slotPrice ?? null} isMember={mem}
+        date={date ?? ''} time={time ?? ''} timeFormat={timeFormat} addons={pickedAddons} addonTotal={price?.addonTotal ?? 0}
+        visits={multiOn ? multiPicks : null}
         name={cust?.name ?? ''} phone={cust?.phone_e164 ?? ''}
         addressLine={[addr.unit.trim(), addr.address.trim()].filter(Boolean).join(', ')}
         addressSub={[addr.postcode.trim(), addr.city.trim()].filter(Boolean).join(' ')}
@@ -467,12 +681,17 @@ export default function Book() {
       return <SuccessStep tenantName={tenant.name} bookingRef={formatBookingId(done.booking_id) || done.booking_ref || ''}
         serviceName={done.service_name ?? service?.name ?? '—'} date={done.appointment_date ?? date ?? ''}
         time={done.appointment_time ?? time ?? ''} timeFormat={timeFormat} addons={done.addons}
+        more={(done.bookings?.length ?? 0) > 1 ? done.bookings!.slice(1).map(b => ({
+          ref: formatBookingId(b.booking_id), serviceName: b.service_name, date: b.appointment_date, time: b.appointment_time,
+        })) : undefined}
         onBookAgain={reset} onViewBookings={() => { reset(); router.navigate('/'); }} />;
     }
     return null;
   })();
 
   const showFoot = step !== 5 && !paying && !failed;
+  // The summary shows the visits' totals once a date is ticked (steps 1–2) or at checkout.
+  const multiLive = multiOn && (step === 4 ? multiPicks.length > 0 : multiDates.length > 0);
 
   return (
     <View style={styles.root}>
@@ -491,14 +710,18 @@ export default function Book() {
           )}
         </View>
 
-        {!paying && !failed && (
+        {!paying && !failed && !(step === 5 && multiOn) && (
           <SummaryCard
             service={service} isMember={mem} date={date} time={time} timeFormat={timeFormat}
             addons={pickedAddons.map(a => ({ id: a.id, name: a.name, price: price?.eff.get(a.id) ?? a.price }))}
             addonTotal={price?.addonTotal ?? 0} priceFrom={price?.from ?? null} slotPrice={price?.slotPrice ?? null}
-            peakName={price?.peak.rule?.name ?? ''} sdAmount={price?.sd ?? 0} sdCfg={price?.sdCfg ?? null}
+            peakName={price?.peak.rule?.name ?? ''}
+            sdAmount={(multiTotals && multiLive ? multiTotals.sd : price?.sd) ?? 0}
+            sdCfg={(multiTotals && multiLive ? multiTotals.sdCfg : price?.sdCfg) ?? null}
             taxRate={cfg?.taxRate ?? 0} taxMode={cfg?.taxMode ?? 'exclusive'} taxName={cfg?.taxName || 'Tax'}
-            tax={price?.tax ?? { tax: 0, total: 0, rounding: 0 }} checkout={step === 4}
+            tax={(multiTotals && multiLive ? multiTotals.tax : price?.tax) ?? { tax: 0, total: 0, rounding: 0 }} checkout={step === 4}
+            multi={multiOn && step < 4 ? { dates: multiDates, picks: multiPicks, working: workingDateKey, onRemove: removeMultiPick, hideTimes: order === 'date-first' } : null}
+            visits={multiOn && step === 4 ? multiPicks : null}
             points={{
               name: pointsName, enabled: pointsOn && balance > 0, balance, whole, use: usePoints, onToggle: setUsePoints,
               amount: pointsAmount, onAmount: setPointsAmount, applied: pointsApplied,
@@ -537,6 +760,9 @@ export default function Book() {
       )}
 
       <AddonsPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} addons={pricedAddons} selected={pickedAddons.map(a => a.id)} onToggle={toggleAddon} />
+      <MultiAddonPrompt open={multiPromptOpen} onClose={() => setMultiPromptOpen(false)} visits={missingAddons}
+        tenantName={tenant.name} memberMode={addonMode} timeFormat={timeFormat}
+        onConfirm={sel => { setMultiPromptOpen(false); setMultiPicks(ps => applyVisitAddons(ps, sel, addonMode)); advance(); }} />
       <AddonSkipConfirm open={skipOpen} onClose={() => setSkipOpen(false)}
         onConfirm={() => { setSkipOpen(false); advance(); }}
         addons={pricedAddons} selected={pickedAddons.map(a => a.id)} onToggle={toggleAddon} tenantName={tenant.name} />

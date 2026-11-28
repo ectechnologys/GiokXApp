@@ -54,6 +54,8 @@ export interface BookingConfig {
   taxName: string;
   taxRoundUp: boolean;
   specialDiscount: SpecialDiscountConfig;
+  /** Settings → Bookings → multiple bookings (up to 10 visits, one checkout). */
+  multiBookingEnabled?: boolean;
 }
 
 export interface ServerSlot {
@@ -263,12 +265,32 @@ export interface CreateBookingPayload {
   requested_maid_id?: string | null;
 }
 
+export interface BookedVisit {
+  booking_id: string;
+  service_name: string;
+  appointment_date: string;
+  appointment_time: string;
+  addons?: { id: string; name: string; price: number }[];
+}
+
 export interface BookingSuccess {
   booking_id?: string;
   service_name?: string;
   appointment_date?: string;
   appointment_time?: string;
   addons?: { id: string; name: string; price: number }[];
+  /** Multi-date checkout: every confirmed visit, the first one included. */
+  bookings?: BookedVisit[];
+}
+
+/** One visit of a multi-date checkout (payments-start multi_bookings, max 10). */
+export interface MultiBookingItem {
+  service_id: string;
+  appointment_date: string;
+  appointment_time: string;
+  duration_minutes?: number;
+  selected_addon_ids?: string[];
+  requested_maid_id?: string;
 }
 
 async function post<T>(fn: string, token: string, body: Record<string, unknown>): Promise<T> {
@@ -289,7 +311,7 @@ export const createBooking = (token: string, p: CreateBookingPayload) =>
 /** Payment tenants: HitPay checkout URL, or paid_in_full when points cover it.
  *  HitPay returns the browser tab to the app (lib/payReturn.ts); the app polls
  *  payments-status for its own screen. */
-export const startPayment = (token: string, p: CreateBookingPayload & { redeem_points?: boolean; redeem_points_amount?: number }) =>
+export const startPayment = (token: string, p: CreateBookingPayload & { redeem_points?: boolean; redeem_points_amount?: number; multi_bookings?: MultiBookingItem[] }) =>
   post<BookingSuccess & { ok: true; checkout_url?: string; hold_token?: string; paid_in_full?: boolean; redeemed_amount?: number }>(
     'payments-start', token, { return_origin: paymentReturnOrigin, ...p },
   );

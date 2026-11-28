@@ -111,10 +111,17 @@ export function Stepper({ step, onSwap, swapLabel }: { step: number; onSwap?: ()
 
 // ── Step heading ────────────────────────────────────────────────────────────
 
-export function StepHead({ title, sub }: { title: string; sub?: string }) {
+export function StepHead({ title, sub, aside }: { title: string; sub?: string; aside?: ReactNode }) {
   return (
     <>
-      <Text style={s.h2}>{title}</Text>
+      {aside ? (
+        // Web .bf-step-head: heading left, the control on the same line when
+        // it fits (wraps under it on a narrow phone).
+        <View style={s.headRow}>
+          <Text style={[s.h2, { marginBottom: 0 }]}>{title}</Text>
+          {aside}
+        </View>
+      ) : <Text style={s.h2}>{title}</Text>}
       {sub ? <Text style={s.sub}>{sub}</Text> : <View style={{ height: 16 }} />}
     </>
   );
@@ -216,6 +223,7 @@ export const s = StyleSheet.create({
   connector: { flex: 1, minWidth: 40, flexDirection: 'row', alignItems: 'center', gap: 6 },
   swap: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: bf.line, alignItems: 'center', justifyContent: 'center' },
 
+  headRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', columnGap: 12, rowGap: 10, marginBottom: 6 },
   h2: { fontSize: 18, fontWeight: '600', letterSpacing: -0.36, color: bf.ink, marginBottom: 6 },
   sub: { fontSize: 13.5, color: bf.ink3, lineHeight: 21, marginBottom: 22 },
   kicker: { fontSize: 10.5, fontWeight: '700', letterSpacing: 2.3, textTransform: 'uppercase', color: bf.muted },

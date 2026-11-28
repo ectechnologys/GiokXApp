@@ -1,6 +1,6 @@
 // Web SummaryCard ("Your booking" sidebar, shown under the step on a phone)
 // and PointsRedeemControl (step 4: tick, balance, amount to use, Max).
-import { CheckCircle2 } from 'lucide-react-native';
+import { CheckCircle2, X } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -11,6 +11,7 @@ import type { SpecialDiscountConfig } from '@/shared/specialDiscount';
 import type { TaxMode } from '@/shared/tax';
 
 import { fmtDayMid, line2, redeemCap, redeemClamp, rm, Tick } from './atoms';
+import type { MultiPick } from './multi';
 
 export interface PointsProps {
   name: string;
@@ -44,6 +45,11 @@ export interface SummaryProps {
   tax: { tax: number; total: number; rounding: number };
   checkout: boolean;
   points: PointsProps;
+  /** Steps 1–2 of a multi-date checkout with at least one date ticked: every
+   *  date with its status (web SummaryCard `multi`). Totals are the visits'. */
+  multi?: { dates: string[]; picks: MultiPick[]; working: string | null; onRemove: (k: string) => void; hideTimes: boolean } | null;
+  /** Step 4 of a multi-date checkout: the completed visits (web multiPicks). */
+  visits?: MultiPick[] | null;
 }
 
 function sdLabel(t: (s: string, v?: Record<string, string | number>) => string, cfg: SpecialDiscountConfig | null): string {
@@ -100,16 +106,33 @@ export function SummaryCard(p: SummaryProps) {
     </View>
   );
 
-  if (p.checkout && p.service) {
+  const isMulti = !!p.visits?.length;
+  if (p.checkout && (p.service || isMulti)) {
     const applied = Math.min(Math.max(0, p.points.applied), grandTotal);
     const toPay = Math.max(0, Math.round((grandTotal - applied) * 100) / 100);
     return (
       <View style={st.card}>
-        {head}
+        {isMulti ? (
+          <View style={st.head}>
+            <Text style={st.h3}>{t('Your {n} bookings', { n: p.visits!.length })}</Text>
+            <Text style={st.live}>{t('Ready')}</Text>
+          </View>
+        ) : head}
         <View>
-          <Line label={`${p.service.name}${p.isMember ? ` · ${t('Member')}` : ''}`} value={rm(basePrice ?? 0)} />
-          {!!p.peakName && <Line label={`${t('Peak day')} · ${p.peakName}`} color={accent} />}
-          {p.addons.map(a => <Line key={a.id} label={a.name} value={rm(a.price)} />)}
+          {isMulti ? p.visits!.map((v, i) => (
+            <View key={v.dateKey} style={[st.visit, i > 0 && st.visitSep]}>
+              <View style={st.visitH}><Text style={st.visitHText}>{`${fmtDayMid(v.dateKey)} · ${fmtBookingTime(v.time, p.timeFormat)}`}</Text></View>
+              <Line label={`${v.serviceName}${v.member ? ` · ${t('Member')}` : ''}`} value={rm(v.basePrice)} />
+              {!!v.peakName && <Line label={`${t('Peak day')} · ${v.peakName}`} color={accent} />}
+              {v.addons.map(a => <Line key={a.id} label={a.name} value={rm(a.price)} />)}
+            </View>
+          )) : (
+            <>
+              <Line label={`${p.service!.name}${p.isMember ? ` · ${t('Member')}` : ''}`} value={rm(basePrice ?? 0)} />
+              {!!p.peakName && <Line label={`${t('Peak day')} · ${p.peakName}`} color={accent} />}
+              {p.addons.map(a => <Line key={a.id} label={a.name} value={rm(a.price)} />)}
+            </>
+          )}
           {breakdown}
           <Big label={t('Total')} value={rm(grandTotal)} />
           {applied > 0 && (
@@ -125,6 +148,53 @@ export function SummaryCard(p: SummaryProps) {
             </>
           )}
           {p.points.enabled && <PointsRedeemControl {...p.points} total={grandTotal} />}
+        </View>
+      </View>
+    );
+  }
+
+  if (p.multi && p.multi.dates.length > 0) {
+    const m = p.multi;
+    return (
+      <View style={st.card}>
+        <View style={st.head}>
+          <Text style={st.h3}>{t('Your bookings')}</Text>
+          <Text style={st.live}>{m.working ? `${m.picks.length}/${m.dates.length}` : t('Ready')}</Text>
+        </View>
+        <View>
+          {m.dates.map((k, i) => {
+            const pick = m.picks.find(x => x.dateKey === k);
+            const working = m.working === k && !pick;
+            return (
+              <View key={k} style={[st.visit, i > 0 && st.visitSep]}>
+                <View style={st.visitH}>
+                  <Text style={[st.visitHText, working && { color: accent }]}>{fmtDayMid(k)}</Text>
+                  {pick && (
+                    <Pressable onPress={() => m.onRemove(k)} hitSlop={10} style={({ pressed }) => [st.visitX, pressed && { backgroundColor: bf.dangerSoft }]}
+                      accessibilityLabel={t('Re-pick this date')}>
+                      {({ pressed }) => <X size={12} color={pressed ? bf.danger : bf.muted2} strokeWidth={2.5} />}
+                    </Pressable>
+                  )}
+                </View>
+                {pick ? (
+                  <>
+                    <Line label={`${fmtBookingTime(pick.time, p.timeFormat)} · ${pick.serviceName}${pick.member ? ` · ${t('Member')}` : ''}`} value={rm(pick.basePrice)} />
+                    {!!pick.peakName && <Line label={`${t('Peak day')} · ${pick.peakName}`} color={accent} />}
+                    {!!pick.requestedMaidLabel && <Line label={`${t('Team')} · ${pick.requestedMaidLabel}`} />}
+                    {pick.addons.map(a => <Line key={a.id} label={a.name} value={rm(a.price)} />)}
+                  </>
+                ) : (
+                  <Text style={st.visitStatus}>
+                    {working ? (m.hideTimes ? t('Choosing service & time…') : t('Choosing a time…')) : t('Waiting')}
+                  </Text>
+                )}
+              </View>
+            );
+          })}
+        </View>
+        <View style={st.totals}>
+          {breakdown}
+          <Big label={`${t('Total')} · ${m.picks.length}/${m.dates.length} ${m.dates.length > 1 ? t('visits') : t('visit')}`} value={rm(grandTotal)} />
         </View>
       </View>
     );
@@ -242,6 +312,12 @@ const st = StyleSheet.create({
   big: { paddingTop: 8, marginTop: 6, borderTopWidth: 1, borderTopColor: line2 },
   bigK: { fontSize: 12.5, fontWeight: '600', color: bf.ink },
   bigV: { fontSize: 22, fontWeight: '600', letterSpacing: -0.4, color: bf.ink },
+  visit: { paddingVertical: 7 },
+  visitSep: { borderTopWidth: 1, borderTopColor: line2 },
+  visitH: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 3 },
+  visitHText: { flexShrink: 1, fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: bf.muted2 },
+  visitX: { padding: 2, borderRadius: 5 },
+  visitStatus: { fontSize: 12, color: bf.muted2, fontStyle: 'italic', paddingTop: 1, paddingBottom: 2 },
   hint: { fontSize: 11.5, color: bf.muted, lineHeight: 16 },
   covered: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 2 },
   coveredText: { flex: 1, fontSize: 11.5, color: accent, fontWeight: '600', lineHeight: 16 },

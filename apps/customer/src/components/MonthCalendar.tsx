@@ -1,6 +1,8 @@
 // The web booking flow's month calendar (bf-cal): S M T W T F S grid, past /
 // out-of-window days grey, full days struck through, today ringed in the
-// accent, the pick filled ink, a red dot on public holidays.
+// accent, the pick filled ink, a red dot on public holidays. With `multi`
+// (multi-date checkout) every picked date is filled, and a green dot marks the
+// dates whose visit is already complete (web is-multi-done / is-multi-working).
 import { useQueries } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
@@ -12,8 +14,11 @@ import { accent, bf } from '@/lib/theme';
 
 const key = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-export function MonthCalendar({ value, onPick, minDate, maxDate, today, holidays, allowHoliday, token, slotMatches, disabled }: {
+export function MonthCalendar({ value, onPick, minDate, maxDate, today, holidays, allowHoliday, token, slotMatches, disabled, multi }: {
   value: string | null;
+  /** Multi-select: the picked dates, the ones with a finished visit, and the
+   *  date being configured now. */
+  multi?: { dates: string[]; done: string[]; working: string | null };
   onPick: (d: string) => void;
   /** First bookable day (today or the company's "booking from"). */
   minDate: string;
@@ -27,7 +32,7 @@ export function MonthCalendar({ value, onPick, minDate, maxDate, today, holidays
   disabled?: boolean;
 }) {
   const { lang } = useT();
-  const start = value ?? (minDate > today ? minDate : today);
+  const start = value ?? multi?.dates[0] ?? (minDate > today ? minDate : today);
   const [cursor, setCursor] = useState(() => { const d = new Date(`${start}T00:00:00`); return { y: d.getFullYear(), m: d.getMonth() }; });
 
   const days = useMemo(() => {
@@ -80,11 +85,13 @@ export function MonthCalendar({ value, onPick, minDate, maxDate, today, holidays
           const holBlocked = !past && !beyond && !!hol && !allowHoliday;
           const unavail = !past && !beyond && !holBlocked && unavailable.has(k);
           const blocked = past || beyond || holBlocked || unavail || !!disabled;
-          const on = value === k;
+          const on = multi ? multi.dates.includes(k) : value === k;
+          const multiDone = !!multi && multi.done.includes(k);
+          const multiWorking = !!multi && multi.working === k;
           return (
             <View key={i} style={styles.cell}>
               <Pressable disabled={blocked} onPress={() => onPick(k)}
-                style={[styles.day, on && styles.dayOn, k === today && !on && styles.today]}>
+                style={[styles.day, on && styles.dayOn, k === today && !on && styles.today, multiWorking && !on && styles.working]}>
                 <Text style={[
                   styles.dayText,
                   (past || beyond || unavail) && { color: bf.muted2 },
@@ -93,6 +100,7 @@ export function MonthCalendar({ value, onPick, minDate, maxDate, today, holidays
                   on && { color: '#fff', fontWeight: '600' },
                 ]}>{d.getDate()}</Text>
                 {hol ? <View style={[styles.holDot, on && { backgroundColor: '#fff' }]} /> : null}
+                {multiDone ? <View style={styles.doneDot} /> : null}
               </Pressable>
             </View>
           );
@@ -114,5 +122,7 @@ const styles = StyleSheet.create({
   dayOn: { backgroundColor: bf.ink },
   today: { borderColor: accent },
   dayText: { fontSize: 13, fontWeight: '500', color: bf.ink, fontVariant: ['tabular-nums'] },
+  working: { borderColor: bf.muted2 },
+  doneDot: { position: 'absolute', bottom: 3, width: 4, height: 4, borderRadius: 2, backgroundColor: bf.good },
   holDot: { position: 'absolute', bottom: 4, width: 3, height: 3, borderRadius: 1.5, backgroundColor: bf.danger },
 });

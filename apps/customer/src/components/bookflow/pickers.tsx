@@ -94,7 +94,19 @@ export function ServiceStep({ cards, value, onChange, isMember, addonCount, pick
 
 export interface TimeRow { time: string; price: number | null; blocked: boolean }
 
-export function TimesPanel({ date, rows, timeFormat, time, onTime, maids, maidId, onMaid, emptyHint }: {
+/** Multi-date checkout state for the time column (web DateTimeStep `multi`). */
+export interface TimesMulti {
+  /** How many dates are ticked. */
+  count: number;
+  /** The date being configured now (null = every date has its visit). */
+  working: string | null;
+  /** 1-based position of `working` among the ticked dates. */
+  index: number;
+  /** Saves the held visit — only while a time is held for the team picker. */
+  onSave?: () => void;
+}
+
+export function TimesPanel({ date, rows, timeFormat, time, onTime, maids, maidId, onMaid, emptyHint, multi }: {
   date: string | null;
   /** null = no service yet (date-first, nothing to list). */
   rows: TimeRow[] | null;
@@ -105,13 +117,28 @@ export function TimesPanel({ date, rows, timeFormat, time, onTime, maids, maidId
   maidId: string | null;
   onMaid: (id: string | null) => void;
   emptyHint?: boolean;
+  multi?: TimesMulti;
 }) {
   const { t } = useT();
+  const kicker = multi
+    ? (multi.count === 0 ? t('Pick your dates first') : multi.working ? t('Times') : t('All set'))
+    : (date ? t('Times') : t('Pick a date first'));
   return (
     <View style={st.panel}>
-      <Kicker style={{ marginBottom: 8 }}>{date ? t('Times') : t('Pick a date first')}</Kicker>
-      {date && <Text style={st.panelDate}>{fmtDayShort(date)}</Text>}
-      {!date ? (
+      <Kicker style={{ marginBottom: 8 }}>{kicker}</Kicker>
+      {multi ? (
+        multi.working ? (
+          <Text style={st.panelDate}>
+            {fmtDayShort(multi.working)}
+            <Text style={st.progress}>{`  ${t('· visit {i} of {n}', { i: multi.index, n: multi.count })}`}</Text>
+          </Text>
+        ) : null
+      ) : date && <Text style={st.panelDate}>{fmtDayShort(date)}</Text>}
+      {multi && multi.count === 0 ? (
+        <View style={st.timeEmpty}><Text style={st.timeEmptyText}>{t('Tick the dates you want on the calendar — then pick a time for each.')}</Text></View>
+      ) : multi && !multi.working ? (
+        <View style={st.timeEmpty}><Text style={st.timeEmptyText}>{t('Every date has a time — review the list below, or tick another date.')}</Text></View>
+      ) : !date ? (
         emptyHint ? <View style={st.timeEmpty}><Text style={st.timeEmptyText}>{t("Time slots appear once you've picked a date.")}</Text></View> : null
       ) : (
         <View style={{ gap: 4 }}>
@@ -146,6 +173,12 @@ export function TimesPanel({ date, rows, timeFormat, time, onTime, maids, maidId
           <Text style={st.maidNote}>
             {t("Free to choose — we'll hold them for this visit. Where a job takes two people, the one you pick is the one we promise. If they become unavailable before you finish, we'll say so.")}
           </Text>
+          {/* A series saves one visit at a time (web .bf-maids-save). */}
+          {multi?.onSave && (
+            <Pressable onPress={multi.onSave} style={({ pressed }) => [st.save, pressed && { opacity: 0.88 }]}>
+              <Text style={st.saveText}>{t('Save this visit')}</Text>
+            </Pressable>
+          )}
         </View>
       )}
     </View>
@@ -222,6 +255,9 @@ const st = StyleSheet.create({
   maid: { paddingVertical: 7, paddingHorizontal: 12, borderWidth: 1, borderColor: bf.line, borderRadius: 999, backgroundColor: '#fff' },
   maidOn: { backgroundColor: bf.ink, borderColor: bf.ink },
   maidText: { fontSize: 12.5, fontWeight: '500', color: bf.ink },
+  save: { marginTop: 12, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, backgroundColor: bf.ink, alignItems: 'center' },
+  saveText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  progress: { fontSize: 11, fontWeight: '600', color: accent },
   maidNote: { marginTop: 8, fontSize: 11.5, lineHeight: 17, color: bf.muted },
 
   closed: { gap: 6, marginTop: 18, paddingVertical: 26, paddingHorizontal: 24, borderRadius: 12, backgroundColor: bf.raised, borderWidth: 1, borderColor: bf.line, alignItems: 'center' },

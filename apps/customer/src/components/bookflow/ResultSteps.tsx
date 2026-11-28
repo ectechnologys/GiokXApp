@@ -7,6 +7,7 @@ import { fmtBookingTime, useT } from '@/lib/i18n';
 import { accent, bf, gray } from '@/lib/theme';
 
 import { fmtDayLong, fmtDayMid, line2, mono, StepHead } from './atoms';
+import type { MultiPick } from './multi';
 
 // ── Step 4 — Confirm ────────────────────────────────────────────────────────
 
@@ -22,26 +23,44 @@ function ConfirmRow({ label, value, note }: { label: string; value: string; note
   );
 }
 
-export function ConfirmStep({ tenantName, serviceName, slotPrice, isMember, date, time, timeFormat, addons, addonTotal, name, phone, addressLine, addressSub, lobby, notes }: {
+export function ConfirmStep({ tenantName, serviceName, slotPrice, isMember, date, time, timeFormat, addons, addonTotal, name, phone, addressLine, addressSub, lobby, notes, visits }: {
   tenantName: string; serviceName: string; slotPrice: number | null; isMember: boolean;
   date: string; time: string; timeFormat: '12h' | '24h';
   addons: { name: string }[]; addonTotal: number;
   name: string; phone: string; addressLine: string; addressSub: string; lobby: string; notes: string;
+  /** Multi-date checkout: one row per visit replaces Service / Extras / When. */
+  visits?: MultiPick[] | null;
 }) {
   const { t } = useT();
   const r2 = (n: number) => Math.round(n * 100) / 100;
+  const isMulti = !!visits?.length;
   return (
     <View>
-      <StepHead title={t('Review your booking')} sub={t('A quick read-back before we send it to {name}.', { name: tenantName })} />
+      <StepHead title={isMulti ? t('Review your {n} bookings', { n: visits!.length }) : t('Review your booking')}
+        sub={t('A quick read-back before we send it to {name}.', { name: tenantName })} />
       <View style={st.review}>
         {/* marginBottom -1 clips the last row's divider (web :last-child). */}
         <View style={{ marginBottom: -1 }}>
-        <ConfirmRow label={t('Service')} value={serviceName}
-          note={slotPrice !== null ? `RM ${r2(slotPrice)}${isMember ? ` · ${t('Member price')}` : ''}` : undefined} />
-        {addons.length > 0 && (
-          <ConfirmRow label={t('Extras ({n})', { n: addons.length })} value={addons.map(a => a.name).join(' · ')} note={`+ RM ${r2(addonTotal)}`} />
+        {isMulti ? visits!.map((p, i) => (
+          <ConfirmRow key={p.dateKey} label={t('Visit {n}', { n: i + 1 })}
+            value={`${fmtDayLong(p.dateKey)} · ${fmtBookingTime(p.time, timeFormat)}`}
+            note={[
+              `${p.serviceName} RM ${r2(p.basePrice)}`,
+              ...p.addons.map(a => `${a.name} RM ${r2(a.price)}`),
+              ...(p.addons.length ? [t('RM {n} total', { n: r2(p.price) })] : []),
+              ...(p.member ? [t('Member price')] : []),
+              ...(p.requestedMaidLabel ? [t('Team: {name}', { name: p.requestedMaidLabel })] : []),
+            ].join(' · ')} />
+        )) : (
+          <>
+            <ConfirmRow label={t('Service')} value={serviceName}
+              note={slotPrice !== null ? `RM ${r2(slotPrice)}${isMember ? ` · ${t('Member price')}` : ''}` : undefined} />
+            {addons.length > 0 && (
+              <ConfirmRow label={t('Extras ({n})', { n: addons.length })} value={addons.map(a => a.name).join(' · ')} note={`+ RM ${r2(addonTotal)}`} />
+            )}
+            <ConfirmRow label={t('When')} value={fmtDayLong(date)} note={fmtBookingTime(time, timeFormat)} />
+          </>
         )}
-        <ConfirmRow label={t('When')} value={fmtDayLong(date)} note={fmtBookingTime(time, timeFormat)} />
         <ConfirmRow label={t('Customer')} value={name || '—'} note={phone} />
         <ConfirmRow label={t('Address')} value={addressLine || '—'} note={addressSub} />
         {!!lobby && <ConfirmRow label={t('Lobby / guard')} value={lobby} />}
@@ -54,19 +73,30 @@ export function ConfirmStep({ tenantName, serviceName, slotPrice, isMember, date
 
 // ── Step 5 — Success ────────────────────────────────────────────────────────
 
-export function SuccessStep({ tenantName, bookingRef, serviceName, date, time, timeFormat, addons, onBookAgain, onViewBookings }: {
+export function SuccessStep({ tenantName, bookingRef, serviceName, date, time, timeFormat, addons, more, onBookAgain, onViewBookings }: {
   tenantName: string; bookingRef: string; serviceName: string; date: string; time: string; timeFormat: '12h' | '24h';
-  addons?: { name: string }[]; onBookAgain: () => void; onViewBookings: () => void;
+  addons?: { name: string }[];
+  /** Multi-date checkout: the confirmed visits after the first one. */
+  more?: { ref: string; serviceName: string; date: string; time: string }[];
+  onBookAgain: () => void; onViewBookings: () => void;
 }) {
   const { t } = useT();
+  const n = more?.length ?? 0;
+  const when = { date: fmtDayMid(date), time: fmtBookingTime(time, timeFormat) };
   return (
     <View style={st.done}>
       <View style={st.doneMark}><CheckCircle2 size={24} color={bf.good} strokeWidth={2.4} /></View>
       <View style={{ alignItems: 'center' }}>
-        <Text style={st.doneKicker}>{t('Booking confirmed')}</Text>
-        <Text style={st.doneH2}>{t('See you {date} at {time}.', { date: fmtDayMid(date), time: fmtBookingTime(time, timeFormat) })}</Text>
+        <Text style={st.doneKicker}>{n ? t('{n} bookings confirmed', { n: n + 1 }) : t('Booking confirmed')}</Text>
+        <Text style={st.doneH2}>
+          {n
+            ? t(n > 1 ? 'See you {date} at {time} — and {n} more visits.' : 'See you {date} at {time} — and {n} more visit.', { ...when, n })
+            : t('See you {date} at {time}.', when)}
+        </Text>
         <Text style={st.doneP}>
-          {t("{name} will reach out shortly to confirm the team. Keep this reference — you'll need it to reschedule or cancel.", { name: tenantName })}
+          {n
+            ? t("{name} will reach out shortly to confirm the team. Keep these references — you'll need them to reschedule or cancel.", { name: tenantName })
+            : t("{name} will reach out shortly to confirm the team. Keep this reference — you'll need it to reschedule or cancel.", { name: tenantName })}
         </Text>
       </View>
 
@@ -84,7 +114,9 @@ export function SuccessStep({ tenantName, bookingRef, serviceName, date, time, t
 
       <View>
         <Text style={st.details}>
-          <Text style={{ color: bf.muted }}>{`${t('Service')} · `}</Text>
+          <Text style={{ color: bf.muted }}>
+            {n ? `${t('Visit {n}', { n: 1 })} · ${when.date} ${when.time} · ` : `${t('Service')} · `}
+          </Text>
           <Text style={st.detailsB}>{serviceName}</Text>
         </Text>
         {!!addons?.length && (
@@ -93,6 +125,13 @@ export function SuccessStep({ tenantName, bookingRef, serviceName, date, time, t
             <Text style={st.detailsB}>{addons.map(a => a.name).join(' · ')}</Text>
           </Text>
         )}
+        {(more ?? []).map((m, i) => (
+          <Text key={m.ref || i} style={st.details}>
+            <Text style={{ color: bf.muted }}>{`${t('Visit {n}', { n: i + 2 })} · ${fmtDayMid(m.date)} ${fmtBookingTime(m.time, timeFormat)} · `}</Text>
+            <Text style={st.detailsB}>{m.serviceName}</Text>
+            {!!m.ref && <Text style={st.detailsRef}>{`  ${m.ref}`}</Text>}
+          </Text>
+        ))}
       </View>
 
       <View style={st.actions}>
@@ -191,6 +230,7 @@ const st = StyleSheet.create({
   copyText: { fontSize: 11.5, color: bf.ink3, fontWeight: '500' },
   details: { fontSize: 12.5, color: bf.ink3, lineHeight: 20, textAlign: 'center' },
   detailsB: { color: bf.ink, fontWeight: '600' },
+  detailsRef: { fontFamily: mono, fontSize: 11, color: bf.muted },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 4 },
   act: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
   actPrimary: { backgroundColor: bf.ink },
