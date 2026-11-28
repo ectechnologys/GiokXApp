@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { ArrowLeft, ArrowRight, Check, CreditCard, MessageCircle } from 'lucide-react-native';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -69,6 +69,9 @@ export default function Book() {
   const insets = useSafeAreaInsets();
   const [order, setOrder] = useState<OrderMode>('date-first');
   const [step, setStep] = useState<Step>(1);
+  // Each step starts at the top, like the web.
+  const scroller = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  useEffect(() => { scroller.current?.scrollTo({ y: 0, animated: false }); }, [step]);
   const [service, setService] = useState<ServiceRow | null>(null);
   const [addonIds, setAddonIds] = useState<string[]>([]); // pick order matters
   const [date, setDate] = useState<string | null>(null);
@@ -477,7 +480,7 @@ export default function Book() {
       <Stepper step={paying ? 4 : step} onSwap={swapOrder}
         swapLabel={order === 'date-first' ? t('Switch to Service first') : t('Switch to Date first')} />
 
-      <ScrollView contentContainerStyle={[styles.main, { paddingBottom: showFoot ? 110 : 32 + insets.bottom }]} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scroller} contentContainerStyle={[styles.main, { paddingBottom: showFoot ? 110 : 32 + insets.bottom }]} keyboardShouldPersistTaps="handled">
         <View style={styles.content}>
           {suspended && <SuspendedNote />}
           <View style={suspended ? { opacity: 0.45 } : null} pointerEvents={suspended ? 'none' : 'auto'}>

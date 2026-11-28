@@ -231,7 +231,8 @@ const styles = StyleSheet.create({
   name: { fontSize: 12.5, fontWeight: '600', marginBottom: 2 },
   role: { fontWeight: '400', opacity: 0.8 },
   body: { fontSize: 14, lineHeight: 19.3 },
-  spacer: { fontSize: 11, color: 'transparent' },
+  // Android drops 'transparent' on nested text (it inherits the body colour), so use 1/255 alpha.
+  spacer: { fontSize: 11, color: 'rgba(0,0,0,0.004)' },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   metaText: { fontSize: 11, lineHeight: 13 },
   metaAbs: { position: 'absolute', right: 9, bottom: 6 },
