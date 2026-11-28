@@ -110,7 +110,7 @@ export function AddExtras({ b, token, startOpen, onDone }: { b: CustomerBooking;
   });
   if (b.status === 'cancelled' || b.team_completed_at) return null;
 
-  const prices = q.data ? addonOptionPrices(q.data, picked) : new Map<string, number>();
+  const { prices, rowPrice } = q.data ? addonOptionPrices(q.data, picked) : { prices: new Map<string, number>(), rowPrice: (a: { price: number }) => a.price };
   const total = Array.from(prices.values()).reduce((s, n) => s + n, 0);
 
   const go = async () => {
@@ -144,7 +144,7 @@ export function AddExtras({ b, token, startOpen, onDone }: { b: CustomerBooking;
       {q.data && q.data.addons.length === 0 && <Text style={{ color: c.muted }}>No more extras can be added to this booking.</Text>}
       {q.data?.addons.map(a => {
         const on = picked.includes(a.id);
-        const shown = on ? prices.get(a.id) ?? a.price : a.is_member_special && q.data.is_member ? a.member_price : a.price;
+        const shown = rowPrice(a);
         return (
           <Pressable key={a.id} onPress={() => setPicked(p => (on ? p.filter(x => x !== a.id) : [...p, a.id]))} style={styles.addonRow}>
             <Text style={{ fontSize: 18, color: on ? accent : c.muted }}>{on ? '☑' : '☐'}</Text>

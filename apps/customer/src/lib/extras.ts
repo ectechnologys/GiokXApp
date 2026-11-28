@@ -87,19 +87,24 @@ export interface AddonOptions {
 export const getAddonOptions = (token: string, bookingId: string) =>
   callFunction<{ ok: true } & AddonOptions>('customer-auth', { action: 'booking-addon-options', booking_id: bookingId }, token);
 
-/** Prices for a picked set, exactly as the web picker shows them. */
-export function addonOptionPrices(o: AddonOptions, picked: string[]): Map<string, number> {
-  const out = new Map<string, number>();
+/** Prices for a picked set, exactly as the web picker shows them, plus the
+ *  price each row shows: in 'single' mode only ONE member-special per booking
+ *  gets the member price — already gone if the booking used it
+ *  (member_slot_used) or another ticked row took it. */
+export function addonOptionPrices(o: AddonOptions, picked: string[]) {
+  const prices = new Map<string, number>();
   let slotFree = o.mode === 'all' || !o.member_slot_used;
   for (const id of picked) {
     const a = o.addons.find(x => x.id === id);
     if (!a) continue;
     if (a.is_member_special && o.is_member && slotFree) {
-      out.set(id, Number(a.member_price ?? 0));
+      prices.set(id, Number(a.member_price ?? 0));
       if (o.mode === 'single') slotFree = false;
-    } else out.set(id, Number(a.price ?? 0));
+    } else prices.set(id, Number(a.price ?? 0));
   }
-  return out;
+  const rowPrice = (a: AddonOption) =>
+    prices.get(a.id) ?? (a.is_member_special && o.is_member && slotFree ? Number(a.member_price ?? 0) : Number(a.price ?? 0));
+  return { prices, rowPrice };
 }
 
 /** Buys add-ons for an existing booking. `free` = nothing to pay (attached). */
